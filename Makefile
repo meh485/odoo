@@ -20,3 +20,7 @@ tenant: ## Provision a tenant: make tenant TENANT=acme
 .PHONY: test
 test: ## Run the bats test suite
 	@bats tests/
+
+.PHONY: secrets
+secrets: ## Generate secrets for a tenant: make secrets TENANT=acme
+	@scripts/secrets-generate.sh "$(TENANT)"
