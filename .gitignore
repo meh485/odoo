@@ -3,3 +3,4 @@ secrets/
 *.local
 .local/
 sre-challenge.pdf
+.claude/
