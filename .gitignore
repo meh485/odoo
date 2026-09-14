@@ -1,0 +1,5 @@
+secrets/
+.env
+*.local
+.local/
+sre-challenge.pdf
