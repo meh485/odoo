@@ -4,3 +4,6 @@ secrets/
 .local/
 sre-challenge.pdf
 .claude/
+__pycache__/
+*.pyc
+.pytest_cache/
