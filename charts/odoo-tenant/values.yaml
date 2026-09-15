@@ -53,6 +53,16 @@ backup:
   schedule: "0 2 * * *"
   retentionPolicy: "30d"
 
+network:
+  # Postgres instances must reach the Kubernetes API (the CloudNativePG
+  # instance manager) and object storage (WAL archiving). Both are named
+  # explicitly rather than allowed as 0.0.0.0/0, so a compromised database
+  # pod cannot reach arbitrary hosts.
+  apiServerCIDR: "172.19.0.0/16"
+  apiServerPort: 6443
+  backupNamespace: storage
+  backupPort: 9000
+
 quota:
   requestsCPU: "4"
   requestsMemory: 6Gi

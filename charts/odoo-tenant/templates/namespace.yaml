@@ -5,3 +5,8 @@ metadata:
   name: {{ $tenant }}
   labels:
     {{- include "odoo.labels" . | nindent 4 }}
+    # Enforced by the API server, not merely requested by the pod spec.
+    pod-security.kubernetes.io/enforce: restricted
+    pod-security.kubernetes.io/enforce-version: v1.34
+    pod-security.kubernetes.io/audit: restricted
+    pod-security.kubernetes.io/warn: restricted

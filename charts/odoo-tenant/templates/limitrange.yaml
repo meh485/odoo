@@ -1,0 +1,19 @@
+{{- $tenant := include "odoo.tenant" . }}
+# A pod admitted without limits would escape the quota's intent, so the
+# namespace supplies defaults for anything that omits them.
+apiVersion: v1
+kind: LimitRange
+metadata:
+  name: {{ $tenant }}-limits
+  namespace: {{ $tenant }}
+  labels:
+    {{- include "odoo.labels" . | nindent 4 }}
+spec:
+  limits:
+    - type: Container
+      default:
+        cpu: 500m
+        memory: 512Mi
+      defaultRequest:
+        cpu: 100m
+        memory: 256Mi
