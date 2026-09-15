@@ -1,0 +1,92 @@
+{{- $tenant := include "odoo.tenant" . }}
+# Initialise the Odoo schema. CloudNativePG creates an empty database; without
+# this the tables never exist, every request fails with KeyError: 'ir.http',
+# and /web/health returns 500 indefinitely while the pod looks "Running".
+#
+# Runs as a Helm hook after the cluster exists but before the release is
+# considered done, so an upgrade blocks on a failed migration rather than
+# rolling out pods that cannot serve.
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: {{ $tenant }}-odoo-init
+  namespace: {{ $tenant }}
+  labels:
+    {{- include "odoo.labels" . | nindent 4 }}
+  annotations:
+    helm.sh/hook: post-install,post-upgrade
+    helm.sh/hook-weight: "0"
+    helm.sh/hook-delete-policy: before-hook-creation
+spec:
+  backoffLimit: 3
+  # Leave a completed job visible for a while; a silently vanished init job is
+  # hard to investigate after the fact.
+  ttlSecondsAfterFinished: 3600
+  template:
+    metadata:
+      labels:
+        {{- include "odoo.labels" . | nindent 8 }}
+        app.kubernetes.io/component: init
+    spec:
+      restartPolicy: Never
+      automountServiceAccountToken: false
+      securityContext:
+        {{- include "odoo.podSecurityContext" . | nindent 8 }}
+      containers:
+        - name: odoo-init
+          image: "{{ .Values.odoo.image.repository }}:{{ .Values.odoo.image.tag }}"
+          imagePullPolicy: {{ .Values.odoo.image.pullPolicy }}
+          securityContext:
+            {{- include "odoo.containerSecurityContext" . | nindent 12 }}
+          # --without-demo=all: demo data in a customer database is a
+          # production incident waiting to be discovered by an accountant.
+          args:
+            - "-d"
+            - "{{ $tenant }}"
+            - "-i"
+            - "base"
+            - "--without-demo=all"
+            - "--stop-after-init"
+          env:
+            - name: ODOO_MAX_CRON_THREADS
+              value: "0"
+            - name: ODOO_WORKERS
+              value: "0"
+            - name: ODOO_CONF_TEMPLATE
+              value: /etc/odoo/odoo.conf.template
+            - name: ODOO_CONF_OUT
+              value: /etc/odoo-rendered/odoo.conf
+            - name: SECRETS_PATH
+              value: /etc/odoo-secrets
+          resources:
+            requests: { cpu: 100m, memory: 512Mi }
+            limits: { cpu: "1", memory: 1Gi }
+          volumeMounts:
+            - { name: config, mountPath: /etc/odoo, readOnly: true }
+            - { name: rendered-config, mountPath: /etc/odoo-rendered }
+            - { name: db-credentials, mountPath: /etc/odoo-secrets, readOnly: true }
+            - { name: filestore, mountPath: /var/lib/odoo }
+            - { name: tmp, mountPath: /tmp }
+      volumes:
+        - name: config
+          configMap:
+            name: {{ $tenant }}-odoo-config
+        - name: rendered-config
+          emptyDir: { medium: Memory }
+        - name: db-credentials
+          projected:
+            defaultMode: 0400
+            sources:
+              - secret:
+                  name: {{ $tenant }}-db-app
+                  items:
+                    - { key: password, path: db_password }
+              - secret:
+                  name: {{ $tenant }}-odoo-admin
+                  items:
+                    - { key: admin_passwd, path: admin_passwd }
+        - name: filestore
+          persistentVolumeClaim:
+            claimName: {{ $tenant }}-filestore
+        - name: tmp
+          emptyDir: {}

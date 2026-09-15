@@ -1,4 +1,4 @@
-FROM odoo:18.0
+FROM odoo:19.0
 
 USER root
 COPY entrypoint.sh /usr/local/bin/odoo-entrypoint.sh

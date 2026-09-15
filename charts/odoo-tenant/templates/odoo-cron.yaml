@@ -1,0 +1,92 @@
+{{- $tenant := include "odoo.tenant" . }}
+# Scheduled jobs run in their own workload. In the default single-deployment
+# arrangement a heavy job competes with user requests for the same workers, so
+# report generation degrades interactive latency for every user of the tenant.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ $tenant }}-cron
+  namespace: {{ $tenant }}
+  labels:
+    {{- include "odoo.labels" . | nindent 4 }}
+    app.kubernetes.io/component: cron
+spec:
+  # Exactly one. A second replica would run every scheduled job twice.
+  replicas: 1
+  strategy:
+    # Recreate, not RollingUpdate: two cron containers must never overlap,
+    # even briefly during a deployment.
+    type: Recreate
+  selector:
+    matchLabels:
+      {{- include "odoo.selectorLabels" . | nindent 6 }}
+      app.kubernetes.io/component: cron
+  template:
+    metadata:
+      labels:
+        {{- include "odoo.labels" . | nindent 8 }}
+        app.kubernetes.io/component: cron
+      annotations:
+        checksum/config: {{ include (print $.Template.BasePath "/odoo-config.yaml") . | sha256sum }}
+    spec:
+      automountServiceAccountToken: false
+      securityContext:
+        {{- include "odoo.podSecurityContext" . | nindent 8 }}
+      containers:
+        - name: odoo
+          image: "{{ .Values.odoo.image.repository }}:{{ .Values.odoo.image.tag }}"
+          imagePullPolicy: {{ .Values.odoo.image.pullPolicy }}
+          args: ["--no-http"]
+          securityContext:
+            {{- include "odoo.containerSecurityContext" . | nindent 12 }}
+          env:
+            - name: ODOO_MAX_CRON_THREADS
+              value: {{ .Values.odoo.cron.maxCronThreads | quote }}
+            - name: ODOO_WORKERS
+              value: "0"
+            - name: ODOO_CONF_TEMPLATE
+              value: /etc/odoo/odoo.conf.template
+            - name: ODOO_CONF_OUT
+              value: /etc/odoo-rendered/odoo.conf
+            - name: SECRETS_PATH
+              value: /etc/odoo-secrets
+          # No HTTP listener, so liveness is process-based. Whether cron is
+          # actually doing work is answered by the ir_cron lag metric, not by
+          # a probe that only proves the process exists.
+          livenessProbe:
+            exec:
+              command: ["sh", "-c", "pgrep -f odoo >/dev/null"]
+            initialDelaySeconds: 60
+            periodSeconds: 30
+            failureThreshold: 3
+          resources:
+            {{- toYaml .Values.odoo.cron.resources | nindent 12 }}
+          volumeMounts:
+            - { name: config, mountPath: /etc/odoo, readOnly: true }
+            - { name: rendered-config, mountPath: /etc/odoo-rendered }
+            - { name: db-credentials, mountPath: /etc/odoo-secrets, readOnly: true }
+            - { name: filestore, mountPath: /var/lib/odoo }
+            - { name: tmp, mountPath: /tmp }
+      volumes:
+        - name: config
+          configMap:
+            name: {{ $tenant }}-odoo-config
+        - name: rendered-config
+          emptyDir: { medium: Memory }
+        - name: db-credentials
+          projected:
+            defaultMode: 0400
+            sources:
+              - secret:
+                  name: {{ $tenant }}-db-app
+                  items:
+                    - { key: password, path: db_password }
+              - secret:
+                  name: {{ $tenant }}-odoo-admin
+                  items:
+                    - { key: admin_passwd, path: admin_passwd }
+        - name: filestore
+          persistentVolumeClaim:
+            claimName: {{ $tenant }}-filestore
+        - name: tmp
+          emptyDir: {}

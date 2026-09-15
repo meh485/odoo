@@ -1,0 +1,18 @@
+{{- $tenant := include "odoo.tenant" . }}
+# Odoo stores attachments on disk. Losing this volume breaks every attachment
+# in the database, so it is a first-class persistent claim, not scratch space.
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: {{ $tenant }}-filestore
+  namespace: {{ $tenant }}
+  labels:
+    {{- include "odoo.labels" . | nindent 4 }}
+spec:
+  accessModes: [ReadWriteOnce]
+  resources:
+    requests:
+      storage: {{ .Values.odoo.filestore.size }}
+  {{- with .Values.odoo.filestore.storageClass }}
+  storageClassName: {{ . }}
+  {{- end }}

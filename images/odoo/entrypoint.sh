@@ -1,13 +1,17 @@
 #!/usr/bin/env bash
-# Render odoo.conf from mounted secret files, then exec Odoo.
+# Render odoo.conf from a config template plus mounted secret files, then exec Odoo.
 #
-# Odoo has no native *_FILE support, so the secret-file contract is honoured
-# here rather than by passing passwords through the environment, where they
-# would be visible to `docker inspect` and to anything reading /proc.
+# Odoo has no native *_FILE support. Upstream's entrypoint compensates by
+# passing the database password as a command-line argument, where it is visible
+# in the container's process list. Merging it into a 0600 config file instead
+# keeps it out of the process list, out of the pod environment, and out of
+# `kubectl describe pod` output. Upstream then skips its own argument injection
+# because the value is already present in the config file.
 set -euo pipefail
 
-SECRETS_PATH="${SECRETS_PATH:-/run/secrets}"
-ODOO_CONF_OUT="${ODOO_CONF_OUT:-/tmp/odoo/odoo.conf}"
+SECRETS_PATH="${SECRETS_PATH:-/etc/odoo-secrets}"
+ODOO_CONF_TEMPLATE="${ODOO_CONF_TEMPLATE:-/etc/odoo/odoo.conf.template}"
+ODOO_CONF_OUT="${ODOO_CONF_OUT:-/etc/odoo-rendered/odoo.conf}"
 
 read_secret() {
   local path="${SECRETS_PATH}/$1"
@@ -15,32 +19,27 @@ read_secret() {
   tr -d '\n' < "$path"
 }
 
-ADMIN_PASSWD="$(read_secret odoo_admin_passwd)"
-DB_PASSWORD="$(read_secret pgbouncer_password)"
+[[ -s "$ODOO_CONF_TEMPLATE" ]] || {
+  echo "missing config template: ${ODOO_CONF_TEMPLATE}" >&2
+  exit 1
+}
+
+DB_PASSWORD="$(read_secret db_password)"
+ADMIN_PASSWD="$(read_secret admin_passwd)"
 
 mkdir -p "$(dirname "$ODOO_CONF_OUT")"
 umask 077
 
-cat > "$ODOO_CONF_OUT" <<EOF
-[options]
-admin_passwd = ${ADMIN_PASSWD}
-db_host = ${DB_HOST:-pgbouncer}
-db_port = ${DB_PORT:-6432}
-db_user = ${DB_USER:-odoo}
+# The template carries everything that is not a secret. The two credentials are
+# appended here so neither ever appears in the ConfigMap.
+cat "$ODOO_CONF_TEMPLATE" > "$ODOO_CONF_OUT"
+cat >> "$ODOO_CONF_OUT" <<EOF
 db_password = ${DB_PASSWORD}
-db_name = ${DB_NAME:-odoo}
-dbfilter = ${DBFILTER:-^odoo\$}
-list_db = False
-proxy_mode = True
+admin_passwd = ${ADMIN_PASSWD}
 workers = ${ODOO_WORKERS:-2}
 max_cron_threads = ${ODOO_MAX_CRON_THREADS:-0}
 limit_time_cpu = ${ODOO_LIMIT_TIME_CPU:-600}
 limit_time_real = ${ODOO_LIMIT_TIME_REAL:-1200}
-limit_memory_soft = ${ODOO_LIMIT_MEMORY_SOFT:-2147483648}
-limit_memory_hard = ${ODOO_LIMIT_MEMORY_HARD:-2684354560}
-data_dir = /var/lib/odoo
-logfile = None
-log_level = ${ODOO_LOG_LEVEL:-info}
 EOF
 
 chmod 600 "$ODOO_CONF_OUT"

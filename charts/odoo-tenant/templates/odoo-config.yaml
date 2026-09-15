@@ -1,0 +1,28 @@
+{{- $tenant := include "odoo.tenant" . }}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ $tenant }}-odoo-config
+  namespace: {{ $tenant }}
+  labels:
+    {{- include "odoo.labels" . | nindent 4 }}
+data:
+  # Deliberately carries no password. The entrypoint merges the database
+  # credential from a mounted secret file at startup, so it reaches neither
+  # this ConfigMap, the pod environment, nor the process list.
+  odoo.conf.template: |
+    [options]
+    # CloudNativePG names the pooler Service after the Pooler resource
+    # itself, not with an -rw suffix like the cluster's own services.
+    db_host = {{ $tenant }}-pooler
+    db_port = 5432
+    db_user = odoo
+    db_name = {{ $tenant }}
+    dbfilter = ^{{ $tenant }}$
+    # Closes Odoo's database manager, which otherwise permits unauthenticated
+    # database creation, duplication and restore.
+    list_db = False
+    proxy_mode = True
+    data_dir = /var/lib/odoo
+    logfile = None
+    log_level = {{ .Values.odoo.logLevel }}

@@ -1,0 +1,117 @@
+{{- $tenant := include "odoo.tenant" . }}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ $tenant }}-web
+  namespace: {{ $tenant }}
+  labels:
+    {{- include "odoo.labels" . | nindent 4 }}
+    app.kubernetes.io/component: web
+spec:
+  replicas: {{ .Values.odoo.web.replicas }}
+  strategy:
+    rollingUpdate:
+      # One surge pod at a time, so the quota headroom needed stays constant
+      # rather than scaling with the replica count.
+      maxSurge: 1
+      maxUnavailable: 0
+  selector:
+    matchLabels:
+      {{- include "odoo.selectorLabels" . | nindent 6 }}
+      app.kubernetes.io/component: web
+  template:
+    metadata:
+      labels:
+        {{- include "odoo.labels" . | nindent 8 }}
+        app.kubernetes.io/component: web
+      annotations:
+        # Roll the pods when the rendered configuration changes, rather than
+        # leaving them running with stale config until something restarts them.
+        checksum/config: {{ include (print $.Template.BasePath "/odoo-config.yaml") . | sha256sum }}
+    spec:
+      automountServiceAccountToken: false
+      securityContext:
+        {{- include "odoo.podSecurityContext" . | nindent 8 }}
+      # Spread replicas so a single node failure cannot take the tenant down.
+      topologySpreadConstraints:
+        - maxSkew: 1
+          topologyKey: kubernetes.io/hostname
+          whenUnsatisfiable: ScheduleAnyway
+          labelSelector:
+            matchLabels:
+              {{- include "odoo.selectorLabels" . | nindent 14 }}
+              app.kubernetes.io/component: web
+      containers:
+        - name: odoo
+          image: "{{ .Values.odoo.image.repository }}:{{ .Values.odoo.image.tag }}"
+          imagePullPolicy: {{ .Values.odoo.image.pullPolicy }}
+          securityContext:
+            {{- include "odoo.containerSecurityContext" . | nindent 12 }}
+          env:
+            # No secret is read through the environment; the entrypoint reads
+            # the database credential from the mounted file instead.
+            - name: ODOO_MAX_CRON_THREADS
+              value: "0"
+            - name: ODOO_WORKERS
+              value: {{ .Values.odoo.web.workers | quote }}
+            - name: ODOO_CONF_TEMPLATE
+              value: /etc/odoo/odoo.conf.template
+            - name: ODOO_CONF_OUT
+              value: /etc/odoo-rendered/odoo.conf
+            - name: SECRETS_PATH
+              value: /etc/odoo-secrets
+          ports:
+            - name: http
+              containerPort: 8069
+            - name: longpolling
+              containerPort: 8072
+          # Odoo can take minutes to boot when installing modules. The startup
+          # probe gives it that window; without one the liveness probe kills it
+          # mid-initialisation and the pod never becomes ready.
+          startupProbe:
+            httpGet: { path: /web/health, port: http }
+            periodSeconds: 10
+            failureThreshold: 30
+          readinessProbe:
+            httpGet: { path: /web/health, port: http }
+            periodSeconds: 10
+            timeoutSeconds: 5
+            failureThreshold: 3
+          livenessProbe:
+            httpGet: { path: /web/health, port: http }
+            periodSeconds: 20
+            timeoutSeconds: 5
+            failureThreshold: 3
+          resources:
+            {{- toYaml .Values.odoo.web.resources | nindent 12 }}
+          volumeMounts:
+            - { name: config, mountPath: /etc/odoo, readOnly: true }
+            - { name: rendered-config, mountPath: /etc/odoo-rendered }
+            - { name: db-credentials, mountPath: /etc/odoo-secrets, readOnly: true }
+            - { name: filestore, mountPath: /var/lib/odoo }
+            - { name: tmp, mountPath: /tmp }
+      volumes:
+        - name: config
+          configMap:
+            name: {{ $tenant }}-odoo-config
+        # The root filesystem is read-only, so the rendered config needs a
+        # writable home of its own.
+        - name: rendered-config
+          emptyDir: { medium: Memory }
+        - name: db-credentials
+          projected:
+            defaultMode: 0400
+            sources:
+              - secret:
+                  name: {{ $tenant }}-db-app
+                  items:
+                    - { key: password, path: db_password }
+              - secret:
+                  name: {{ $tenant }}-odoo-admin
+                  items:
+                    - { key: admin_passwd, path: admin_passwd }
+        - name: filestore
+          persistentVolumeClaim:
+            claimName: {{ $tenant }}-filestore
+        - name: tmp
+          emptyDir: {}

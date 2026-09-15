@@ -1,0 +1,20 @@
+{{- $tenant := include "odoo.tenant" . }}
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ $tenant }}-web
+  namespace: {{ $tenant }}
+  labels:
+    {{- include "odoo.labels" . | nindent 4 }}
+spec:
+  type: ClusterIP
+  selector:
+    {{- include "odoo.selectorLabels" . | nindent 4 }}
+    app.kubernetes.io/component: web
+  ports:
+    - name: http
+      port: 8069
+      targetPort: http
+    - name: longpolling
+      port: 8072
+      targetPort: longpolling
