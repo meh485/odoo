@@ -1,0 +1,68 @@
+{{- $tenant := include "odoo.tenant" . }}
+apiVersion: postgresql.cnpg.io/v1
+kind: Cluster
+metadata:
+  name: {{ $tenant }}-db
+  namespace: {{ $tenant }}
+  labels:
+    {{- include "odoo.labels" . | nindent 4 }}
+spec:
+  instances: {{ .Values.postgres.instances }}
+
+  bootstrap:
+    initdb:
+      database: {{ $tenant }}
+      owner: odoo
+      # Odoo requires a UTF-8 database. The default C collation produces
+      # sort-order behaviour that surfaces as application bugs which are
+      # very hard to trace back to the database.
+      encoding: UTF8
+      localeCType: C.UTF-8
+      localeCollate: C.UTF-8
+
+  postgresql:
+    parameters:
+      max_connections: "100"
+      shared_buffers: 512MB
+      effective_cache_size: 1536MB
+      work_mem: 16MB
+      maintenance_work_mem: 128MB
+      # Odoo writes many small rows; a larger WAL reduces checkpoint churn.
+      max_wal_size: 2GB
+      min_wal_size: 256MB
+      checkpoint_completion_target: "0.9"
+      log_min_duration_statement: "1000"
+      log_checkpoints: "on"
+      log_lock_waits: "on"
+      password_encryption: scram-sha-256
+
+  storage:
+    size: {{ .Values.postgres.storage.size }}
+    {{- with .Values.postgres.storage.storageClass }}
+    storageClass: {{ . }}
+    {{- end }}
+
+  resources:
+    {{- toYaml .Values.postgres.resources | nindent 4 }}
+
+  monitoring:
+    enablePodMonitor: true
+
+  {{- if .Values.backup.enabled }}
+  backup:
+    retentionPolicy: {{ .Values.backup.retentionPolicy | quote }}
+    barmanObjectStore:
+      destinationPath: {{ required "backup.destinationPath is required when backup.enabled is true" .Values.backup.destinationPath }}
+      endpointURL: {{ required "backup.endpointURL is required when backup.enabled is true" .Values.backup.endpointURL }}
+      s3Credentials:
+        accessKeyId:
+          name: {{ $tenant }}-backup-credentials
+          key: ACCESS_KEY_ID
+        secretAccessKey:
+          name: {{ $tenant }}-backup-credentials
+          key: ACCESS_SECRET_KEY
+      wal:
+        compression: gzip
+      data:
+        compression: gzip
+  {{- end }}

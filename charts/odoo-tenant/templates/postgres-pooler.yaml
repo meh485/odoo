@@ -1,0 +1,23 @@
+{{- $tenant := include "odoo.tenant" . }}
+{{- if ne .Values.postgres.pooler.poolMode "session" }}
+{{- fail "postgres.pooler.poolMode must be 'session': Odoo relies on prepared statements and session state, which transaction pooling breaks intermittently" }}
+{{- end }}
+apiVersion: postgresql.cnpg.io/v1
+kind: Pooler
+metadata:
+  name: {{ $tenant }}-pooler
+  namespace: {{ $tenant }}
+  labels:
+    {{- include "odoo.labels" . | nindent 4 }}
+spec:
+  cluster:
+    name: {{ $tenant }}-db
+  instances: {{ .Values.postgres.pooler.instances }}
+  type: rw
+  pgbouncer:
+    poolMode: {{ .Values.postgres.pooler.poolMode }}
+    parameters:
+      max_client_conn: {{ .Values.postgres.pooler.maxClientConn | quote }}
+      default_pool_size: {{ .Values.postgres.pooler.defaultPoolSize | quote }}
+  monitoring:
+    enablePodMonitor: true
