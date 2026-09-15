@@ -4,7 +4,10 @@ password_encryption = 'scram-sha-256'
 
 wal_level = replica
 archive_mode = on
-archive_command = 'pgbackrest --stanza=${PGBACKREST_STANZA} archive-push %p'
+# PostgreSQL does not expand environment variables in this file, so the
+# stanza name must be a literal. Each tenant runs its own Postgres, so a
+# fixed stanza is unambiguous and removes a whole class of templating bug.
+archive_command = 'pgbackrest --stanza=main archive-push %p'
 archive_timeout = 300
 
 max_connections = 100

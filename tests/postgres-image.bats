@@ -41,3 +41,23 @@ run_in_image() {
   run run_in_image grep -c "password_encryption = 'scram-sha-256'" /etc/postgresql/conf.d/10-odoo.conf
   [ "$output" = "1" ]
 }
+
+# Regression guard: PostgreSQL does not expand environment variables in
+# postgresql.conf. An unexpanded ${VAR} reaches the shell as a literal and
+# silently breaks WAL archiving, which is invisible until PITR is needed.
+@test "no unexpanded variable placeholders in the tuning file" {
+  run run_in_image grep -c '\${' /etc/postgresql/conf.d/10-odoo.conf
+  [ "$output" = "0" ]
+}
+
+@test "archive_command names a literal stanza" {
+  run run_in_image grep -E "archive_command = .pgbackrest --stanza=[a-z]+ archive-push" /etc/postgresql/conf.d/10-odoo.conf
+  [ "$status" -eq 0 ]
+}
+
+@test "the image ships no default postgresql.conf at the path compose must not reference" {
+  # /etc/postgresql/postgresql.conf does not exist in the official image; a
+  # compose command pointing config_file at it would fail to start Postgres.
+  run docker run --rm --pull=never --entrypoint test odoo-postgres:local -f /etc/postgresql/postgresql.conf
+  [ "$status" -ne 0 ]
+}
