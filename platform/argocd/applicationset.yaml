@@ -1,0 +1,41 @@
+# One Application per file in tenants/. ArgoCD is not run on the local cluster —
+# `make tenant` exercises the same chart — but the manifest is committed so the
+# provisioning mechanism is reviewable: adding a customer is a commit, removing
+# one is a deletion, and drift is reconciled continuously.
+apiVersion: argoproj.io/v1alpha1
+kind: ApplicationSet
+metadata:
+  name: odoo-tenants
+  namespace: argocd
+spec:
+  generators:
+    - git:
+        repoURL: https://github.com/much-consulting/odoo-platform.git
+        revision: main
+        files:
+          - path: "tenants/*.yaml"
+  template:
+    metadata:
+      name: "odoo-{{.tenant.name}}"
+    spec:
+      project: odoo
+      source:
+        repoURL: https://github.com/much-consulting/odoo-platform.git
+        targetRevision: main
+        path: charts/odoo-tenant
+        helm:
+          valueFiles:
+            - "../../tenants/{{.tenant.name}}.yaml"
+      destination:
+        server: https://kubernetes.default.svc
+        namespace: "{{.tenant.name}}"
+      syncPolicy:
+        automated:
+          selfHeal: true
+          # Never prune: removing an Application would delete the namespace and
+          # with it the tenant's PersistentVolumeClaims, so offboarding stays a
+          # deliberate, reviewed act rather than a reconciliation side effect.
+          prune: false
+        syncOptions:
+          # The chart owns the Namespace object, so ArgoCD must not create it.
+          - CreateNamespace=false
