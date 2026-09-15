@@ -8,8 +8,11 @@ metadata:
     {{- include "odoo.labels" . | nindent 4 }}
 spec:
   parentRefs:
+    # Attach to the HTTPS listener specifically. The HTTP listener exists only
+    # to redirect, so a route bound to it would serve the tenant in plaintext.
     - name: {{ .Values.gateway.name }}
       namespace: {{ .Values.gateway.namespace }}
+      sectionName: {{ .Values.gateway.listener }}
   hostnames:
     - {{ required "tenant.hostname is required" .Values.tenant.hostname | quote }}
   rules:

@@ -31,6 +31,10 @@ spec:
                   port: 80
                   targetPort: 10080
                   nodePort: 30080
+                - name: https-443
+                  port: 443
+                  targetPort: 10443
+                  nodePort: 30443
       envoyDeployment:
         pod:
           nodeSelector:

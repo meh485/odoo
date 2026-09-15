@@ -60,6 +60,8 @@ gateway:
   # The shared Gateway the platform team owns. Tenants attach to it.
   name: odoo-edge
   namespace: envoy-gateway-system
+  # The TLS listener. Tenants are never served over the plaintext listener.
+  listener: https
 
 network:
   # Postgres instances must reach the Kubernetes API (the CloudNativePG

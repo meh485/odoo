@@ -9,11 +9,26 @@ metadata:
 spec:
   gatewayClassName: envoy
   listeners:
+    # Plain HTTP exists only to redirect. Browsers treat a non-localhost HTTP
+    # origin as an insecure context, which silently removes navigator.clipboard,
+    # service workers and other APIs Odoo's UI expects.
     - name: http
       protocol: HTTP
       port: 80
       allowedRoutes:
         namespaces:
-          # Any tenant namespace may attach. Which hostnames a tenant may claim
-          # is enforced by the chart pinning one hostname per route.
+          from: All
+
+    - name: https
+      protocol: HTTPS
+      port: 443
+      tls:
+        mode: Terminate
+        certificateRefs:
+          # Self-signed for local development. In production this Secret is
+          # issued by cert-manager; nothing else in this file changes.
+          - kind: Secret
+            name: odoo-edge-tls
+      allowedRoutes:
+        namespaces:
           from: All

@@ -1,0 +1,17 @@
+# Every HTTP request is redirected to HTTPS at the edge, so no tenant route
+# needs to think about it and no tenant can accidentally serve plaintext.
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: http-to-https
+  namespace: envoy-gateway-system
+spec:
+  parentRefs:
+    - name: odoo-edge
+      sectionName: http
+  rules:
+    - filters:
+        - type: RequestRedirect
+          requestRedirect:
+            scheme: https
+            statusCode: 301

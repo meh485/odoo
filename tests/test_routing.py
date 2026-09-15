@@ -79,3 +79,11 @@ def test_route_targets_the_service_that_exists(manifests):
     for rule in one(manifests, "HTTPRoute")["spec"]["rules"]:
         for backend in rule.get("backendRefs", []):
             assert backend["name"] == service_name
+
+
+def test_tenant_route_attaches_to_the_tls_listener(manifests):
+    # The HTTP listener exists only to redirect. A route bound to it would
+    # serve the tenant in plaintext, and browsers strip navigator.clipboard,
+    # service workers and other APIs on an insecure origin.
+    parent = one(manifests, "HTTPRoute")["spec"]["parentRefs"][0]
+    assert parent.get("sectionName") == "https"

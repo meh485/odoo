@@ -39,3 +39,26 @@ def test_envoy_is_pinned_where_the_port_mapping_lives():
     assert pod["nodeSelector"]["kubernetes.io/hostname"]
     assert any(t["key"].startswith("node-role.kubernetes.io/control-plane")
                for t in pod["tolerations"])
+
+
+def test_gateway_terminates_tls():
+    listeners = {l["name"]: l for l in load("gateway.yaml")["spec"]["listeners"]}
+    assert "https" in listeners
+    tls = listeners["https"]["tls"]
+    assert tls["mode"] == "Terminate"
+    assert tls["certificateRefs"][0]["name"]
+
+
+def test_plain_http_only_redirects():
+    # Defence in depth: even if a tenant route attached to the HTTP listener,
+    # the platform redirect answers first.
+    route = load("https-redirect.yaml")
+    rule = route["spec"]["rules"][0]
+    assert "backendRefs" not in rule, "the HTTP listener must not proxy to any backend"
+    redirect = rule["filters"][0]["requestRedirect"]
+    assert redirect["scheme"] == "https"
+    assert redirect["statusCode"] == 301
+
+
+def test_redirect_route_binds_the_http_listener():
+    assert load("https-redirect.yaml")["spec"]["parentRefs"][0]["sectionName"] == "http"
