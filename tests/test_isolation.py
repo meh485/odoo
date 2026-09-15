@@ -41,6 +41,18 @@ def test_no_policy_selects_pods_in_another_namespace(manifests):
         assert policy["metadata"]["namespace"] == "acme"
 
 
+def test_operator_can_read_instance_health(manifests):
+    # The operator reads each instance's status from the instance manager on
+    # 8000. Without this allow the Cluster reports Ready=False while serving
+    # normally, so failover and recovery problems go unreported.
+    policy = next(
+        p for p in by_kind(manifests, "NetworkPolicy")
+        if "operator-to-instance-manager" in p["metadata"]["name"]
+    )
+    ports = {port["port"] for rule in policy["spec"]["ingress"] for port in rule["ports"]}
+    assert 8000 in ports
+
+
 def test_resource_quota_is_declared(manifests):
     hard = one(manifests, "ResourceQuota")["spec"]["hard"]
     assert "requests.cpu" in hard and "limits.memory" in hard
