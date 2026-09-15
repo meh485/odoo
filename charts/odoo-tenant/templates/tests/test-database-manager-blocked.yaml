@@ -1,0 +1,45 @@
+{{- $tenant := include "odoo.tenant" . }}
+# Reached directly, bypassing the Gateway. `list_db = False` does not remove
+# the manager page -- it still renders -- but it must deny the operation the
+# page exists for. A database list that succeeds here means unauthenticated
+# database enumeration, the most exploited Odoo misconfiguration.
+apiVersion: v1
+kind: Pod
+metadata:
+  name: {{ $tenant }}-test-database-manager
+  namespace: {{ $tenant }}
+  labels:
+    {{- include "odoo.labels" . | nindent 4 }}
+    app.kubernetes.io/component: test
+  annotations:
+    helm.sh/hook: test
+    helm.sh/hook-delete-policy: hook-succeeded,before-hook-creation
+spec:
+  restartPolicy: Never
+  automountServiceAccountToken: false
+  securityContext:
+    {{- include "odoo.podSecurityContext" . | nindent 4 }}
+  containers:
+    - name: curl
+      image: curlimages/curl:8.10.1
+      securityContext:
+        {{- include "odoo.containerSecurityContext" . | nindent 8 }}
+      env:
+        - { name: HOME, value: /tmp }
+      command: ["/bin/sh", "-c"]
+      args:
+        - |
+          set -e
+          url="http://{{ $tenant }}-web:8069/web/database/list"
+          body="$(curl -s --max-time 10 -H 'Content-Type: application/json' \
+            -d '{"jsonrpc":"2.0","method":"call","params":{},"id":1}' "$url")"
+          echo "POST ${url} -> ${body}"
+          echo "$body" | grep -q 'AccessDenied'
+      resources:
+        requests: { cpu: 10m, memory: 32Mi }
+        limits: { cpu: 100m, memory: 64Mi }
+      volumeMounts:
+        - { name: tmp, mountPath: /tmp }
+  volumes:
+    - name: tmp
+      emptyDir: {}

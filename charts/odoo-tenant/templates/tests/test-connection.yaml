@@ -1,0 +1,42 @@
+{{- $tenant := include "odoo.tenant" . }}
+# `helm test` runs this after a release is installed: pytest asserts what the
+# chart renders, this asserts that the running tenant actually answers.
+apiVersion: v1
+kind: Pod
+metadata:
+  name: {{ $tenant }}-test-connection
+  namespace: {{ $tenant }}
+  labels:
+    {{- include "odoo.labels" . | nindent 4 }}
+    app.kubernetes.io/component: test
+  annotations:
+    helm.sh/hook: test
+    helm.sh/hook-delete-policy: hook-succeeded,before-hook-creation
+spec:
+  restartPolicy: Never
+  automountServiceAccountToken: false
+  securityContext:
+    {{- include "odoo.podSecurityContext" . | nindent 4 }}
+  containers:
+    - name: curl
+      image: curlimages/curl:8.10.1
+      securityContext:
+        {{- include "odoo.containerSecurityContext" . | nindent 8 }}
+      env:
+        - { name: HOME, value: /tmp }
+      command: ["/bin/sh", "-c"]
+      args:
+        - |
+          set -e
+          url="http://{{ $tenant }}-web:8069/web/health"
+          code="$(curl -s -o /dev/null -w '%{http_code}' --max-time 10 "$url")"
+          echo "GET ${url} -> ${code}"
+          test "$code" = "200"
+      resources:
+        requests: { cpu: 10m, memory: 32Mi }
+        limits: { cpu: 100m, memory: 64Mi }
+      volumeMounts:
+        - { name: tmp, mountPath: /tmp }
+  volumes:
+    - name: tmp
+      emptyDir: {}

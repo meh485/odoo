@@ -332,6 +332,52 @@ spec:
       ports:
         - { protocol: TCP, port: 8069 }
 {{- end }}
+---
+# The `helm test` hooks reach the web service directly to assert live
+# behaviour. One direction each, mirroring the canary flow.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ $tenant }}-allow-test-to-web
+  namespace: {{ $tenant }}
+  labels:
+    {{- include "odoo.labels" . | nindent 4 }}
+spec:
+  podSelector:
+    matchLabels:
+      {{- include "odoo.selectorLabels" . | nindent 6 }}
+      app.kubernetes.io/component: test
+  policyTypes: [Egress]
+  egress:
+    - to:
+        - podSelector:
+            matchLabels:
+              {{- include "odoo.selectorLabels" . | nindent 14 }}
+              app.kubernetes.io/component: web
+      ports:
+        - { protocol: TCP, port: 8069 }
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ $tenant }}-allow-web-from-test
+  namespace: {{ $tenant }}
+  labels:
+    {{- include "odoo.labels" . | nindent 4 }}
+spec:
+  podSelector:
+    matchLabels:
+      {{- include "odoo.selectorLabels" . | nindent 6 }}
+      app.kubernetes.io/component: web
+  policyTypes: [Ingress]
+  ingress:
+    - from:
+        - podSelector:
+            matchLabels:
+              {{- include "odoo.selectorLabels" . | nindent 14 }}
+              app.kubernetes.io/component: test
+      ports:
+        - { protocol: TCP, port: 8069 }
 {{- if .Values.network.egress.smtp.enabled }}
 ---
 apiVersion: networking.k8s.io/v1
