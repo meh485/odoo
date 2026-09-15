@@ -1,0 +1,21 @@
+# ServiceMonitors for platform-owned components. Tenant monitors ship in the
+# chart, so a new tenant is scraped the moment its namespace exists.
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: pushgateway
+  namespace: monitoring
+  labels:
+    app: pushgateway
+spec:
+  selector:
+    matchLabels:
+      app: pushgateway
+  endpoints:
+    # honorLabels keeps the job label the drill pushed (odoo_restore_drill)
+    # instead of overwriting it with the scrape's own, so an alert can still
+    # name the failing job.
+    - port: http
+      path: /metrics
+      interval: 30s
+      honorLabels: true

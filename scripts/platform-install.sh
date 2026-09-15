@@ -6,6 +6,7 @@ set -euo pipefail
 CNPG_VERSION="1.25.0"
 ENVOY_GATEWAY_VERSION="v1.9.1"
 ENVOY_GATEWAY_CHART="oci://docker.io/envoyproxy/gateway-helm"
+KUBE_PROMETHEUS_VERSION="91.4.0"
 
 # CloudNativePG publishes an install manifest rather than a Helm chart. The
 # image tag it deploys is what the cluster runs today.
@@ -17,9 +18,22 @@ helm upgrade --install eg "${ENVOY_GATEWAY_CHART}" \
   --version "${ENVOY_GATEWAY_VERSION}" \
   --namespace envoy-gateway-system --create-namespace
 
+# The monitoring namespace is created here, with its Pod Security Standard
+# labels in place, before the observability stack lands in it.
+kubectl apply -f platform/monitoring/pushgateway.yaml
+
+# Prometheus, Alertmanager and their operator. The operator's CRDs are what
+# give the tenants' ServiceMonitors and alert rules meaning, so the rest of
+# the platform is applied after this.
+helm repo add prometheus-community https://prometheus-community.github.io/helm-charts >/dev/null
+helm repo update >/dev/null
+helm upgrade --install kube-prometheus-stack prometheus-community/kube-prometheus-stack \
+  --version "${KUBE_PROMETHEUS_VERSION}" \
+  --namespace monitoring \
+  -f platform/monitoring/kube-prometheus-stack-values.yaml
+
 # Platform manifests are applied, not templated: the gateway, the object store
-# and the metrics sink are platform-owned and shared by every tenant. Applying
-# them needs the Envoy Gateway CRDs, so it happens after the chart above.
+# and the metrics sink are platform-owned and shared by every tenant.
 kubectl apply -f platform/
 
 # The object store needs a root credential that is deliberately not committed,

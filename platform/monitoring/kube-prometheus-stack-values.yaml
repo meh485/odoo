@@ -1,0 +1,84 @@
+# Observability, trimmed for the local cluster and hardened to the `restricted`
+# Pod Security Standard the monitoring namespace enforces.
+#
+# Deliberately disabled:
+#   - node-exporter and kube-state-metrics, which need host access that
+#     restricted forbids; the metrics this project pages on come from the
+#     tenants and from CloudNativePG, not from the node.
+#   - the default rule set, because this chart ships the rules that matter.
+#   - the bundled Grafana, which is added separately so it can sit behind the
+#     gateway with the other dashboards.
+#
+# Selecting rules, ServiceMonitors and PodMonitors in every namespace is what
+# makes a new tenant observable the moment its namespace exists: there is no
+# target list to remember to update.
+prometheusOperator:
+  enabled: true
+  securityContext:
+    runAsNonRoot: true
+    runAsUser: 65534
+    runAsGroup: 65534
+  containerSecurityContext:
+    allowPrivilegeEscalation: false
+    readOnlyRootFilesystem: true
+    capabilities:
+      drop: [ALL]
+
+prometheus:
+  enabled: true
+  prometheusSpec:
+    replicas: 1
+    retention: 24h
+    securityContext:
+      runAsNonRoot: true
+      runAsUser: 65534
+      runAsGroup: 65534
+      fsGroup: 65534
+      seccompProfile:
+        type: RuntimeDefault
+    resources:
+      requests: { cpu: 100m, memory: 512Mi }
+      limits: { cpu: 500m, memory: 1Gi }
+    serviceMonitorSelectorNilUsesHelmValues: false
+    podMonitorSelectorNilUsesHelmValues: false
+    ruleSelectorNilUsesHelmValues: false
+    serviceMonitorNamespaceSelector: {}
+    podMonitorNamespaceSelector: {}
+    ruleNamespaceSelector: {}
+    storageSpec:
+      volumeClaimTemplate:
+        spec:
+          accessModes: [ReadWriteOnce]
+          resources:
+            requests:
+              storage: 2Gi
+
+alertmanager:
+  enabled: true
+  alertmanagerSpec:
+    replicas: 1
+    # No external pager on a demo cluster: alerts are visible in the
+    # Alertmanager UI and in Prometheus, routed to a null receiver.
+    securityContext:
+      runAsNonRoot: true
+      runAsUser: 65534
+      runAsGroup: 65534
+      fsGroup: 65534
+      seccompProfile:
+        type: RuntimeDefault
+    resources:
+      requests: { cpu: 20m, memory: 64Mi }
+      limits: { cpu: 200m, memory: 128Mi }
+    storage: {}
+
+grafana:
+  enabled: false
+
+prometheus-node-exporter:
+  enabled: false
+
+kube-state-metrics:
+  enabled: false
+
+defaultRules:
+  create: false

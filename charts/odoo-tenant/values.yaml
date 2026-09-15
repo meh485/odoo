@@ -156,3 +156,9 @@ quota:
   limitsCPU: "14"
   limitsMemory: 16Gi
   persistentVolumeClaims: "6"
+
+observability:
+  # ServiceMonitors, PodMonitors and the silent-failure alert rules for this
+  # tenant. Requires the Prometheus Operator CRDs, which the platform installs
+  # together with the monitoring stack.
+  enabled: true

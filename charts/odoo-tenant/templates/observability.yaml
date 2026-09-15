@@ -1,0 +1,125 @@
+{{- $tenant := include "odoo.tenant" . }}
+{{- if .Values.observability.enabled }}
+{{- if .Values.canary.enabled }}
+# The canary exposes its gauges on its Service; scraping them is what turns a
+# tenant that stopped answering into an alert.
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: {{ $tenant }}-canary
+  namespace: {{ $tenant }}
+  labels:
+    {{- include "odoo.labels" . | nindent 4 }}
+spec:
+  selector:
+    matchLabels:
+      {{- include "odoo.selectorLabels" . | nindent 6 }}
+      app.kubernetes.io/component: canary
+  endpoints:
+    - port: metrics
+      interval: 30s
+---
+{{- end }}
+# CloudNativePG exposes the metrics the backup rules read. Scraped explicitly
+# rather than relying on the operator's own PodMonitor, so the wiring is
+# visible in the chart and covered by a test.
+apiVersion: monitoring.coreos.com/v1
+kind: PodMonitor
+metadata:
+  name: {{ $tenant }}-db
+  namespace: {{ $tenant }}
+  labels:
+    {{- include "odoo.labels" . | nindent 4 }}
+spec:
+  selector:
+    matchLabels:
+      cnpg.io/cluster: {{ $tenant }}-db
+  podMetricsEndpoints:
+    - port: metrics
+      interval: 30s
+---
+apiVersion: monitoring.coreos.com/v1
+kind: PodMonitor
+metadata:
+  name: {{ $tenant }}-pooler
+  namespace: {{ $tenant }}
+  labels:
+    {{- include "odoo.labels" . | nindent 4 }}
+spec:
+  selector:
+    matchLabels:
+      cnpg.io/poolerName: {{ $tenant }}-pooler
+  podMetricsEndpoints:
+    - port: metrics
+      interval: 30s
+---
+# The silent-failure catalogue: the conditions where Odoo keeps serving while
+# something important has quietly stopped. These are the alerts that fire when
+# nobody is watching a graph.
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: {{ $tenant }}-silent-failures
+  namespace: {{ $tenant }}
+  labels:
+    {{- include "odoo.labels" . | nindent 4 }}
+spec:
+  groups:
+    - name: {{ $tenant }}.backup
+      rules:
+        - alert: OdooBackupStale
+          # The daily base backup runs at 02:00; 26h catches a single missed run.
+          expr: time() - cnpg_collector_last_available_backup_timestamp{namespace="{{ $tenant }}"} > 93600
+          for: 15m
+          labels:
+            severity: critical
+          annotations:
+            summary: "No successful database backup for {{ $tenant }} in over 26 hours"
+        - alert: OdooWalArchivingStalled
+          expr: cnpg_pg_stat_archiver_seconds_since_last_archival{namespace="{{ $tenant }}"} > 300
+          for: 10m
+          labels:
+            severity: warning
+          annotations:
+            summary: "WAL archiving has stopped for {{ $tenant }}"
+        - alert: OdooWalArchiveFailing
+          expr: increase(cnpg_pg_stat_archiver_failed_count{namespace="{{ $tenant }}"}[1h]) > 0
+          for: 5m
+          labels:
+            severity: warning
+          annotations:
+            summary: "WAL archiving is failing for {{ $tenant }}"
+    - name: {{ $tenant }}.restore
+      rules:
+        # The drill reports the one thing a backup cannot: whether it restores.
+        - alert: OdooRestoreDrillFailed
+          expr: odoo_restore_drill_success{tenant="{{ $tenant }}"} == 0
+          for: 15m
+          labels:
+            severity: critical
+          annotations:
+            summary: "The last restore drill failed for {{ $tenant }}"
+        - alert: OdooRestoreDrillStale
+          expr: time() - odoo_restore_drill_last_run_timestamp_seconds{tenant="{{ $tenant }}"} > 691200
+          for: 1h
+          labels:
+            severity: critical
+          annotations:
+            summary: "No restore drill has run for {{ $tenant }} in over 8 days"
+    - name: {{ $tenant }}.canary
+      rules:
+        - alert: OdooCanaryFailed
+          expr: odoo_canary_success{tenant="{{ $tenant }}"} == 0
+          for: 5m
+          labels:
+            severity: critical
+          annotations:
+            summary: "The login canary is failing for {{ $tenant }}"
+        - alert: OdooCanaryStale
+          expr: time() - odoo_canary_last_run_timestamp_seconds{tenant="{{ $tenant }}"} > 600
+          for: 10m
+          labels:
+            severity: warning
+          annotations:
+            summary: "The canary has not run for {{ $tenant }} in over 10 minutes"
+{{- end }}
