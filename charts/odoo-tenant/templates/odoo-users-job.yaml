@@ -1,0 +1,150 @@
+{{- $tenant := include "odoo.tenant" . }}
+# Initialising an Odoo database from the CLI leaves an `admin` account whose
+# password is the string "admin". A tenant is reachable through the gateway the
+# moment it exists, so that credential is an open front door: neither
+# list_db=False nor blocking the database manager applies to the ordinary login
+# page. This job replaces it and creates the read-only account the canary uses.
+#
+# Idempotent: rerunning sets the same two passwords to the same values.
+# Deliberately NOT a Helm hook. A hook ConfigMap at the same weight as the job
+# that mounts it races: the job can be created first and fails to mount. Normal
+# resources are applied before post-install hooks run, so the script is always
+# present by the time the job starts.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ $tenant }}-odoo-users-script
+  namespace: {{ $tenant }}
+  labels:
+    {{- include "odoo.labels" . | nindent 4 }}
+data:
+  provision_users.py: |
+    """Set the admin password and provision the canary account.
+
+    Passwords are read from mounted files and never appear in argv, in the
+    environment, or in this script's output.
+    """
+    from pathlib import Path
+
+    SECRETS = Path("/etc/odoo-secrets")
+
+
+    def read(name):
+        value = (SECRETS / name).read_text().strip()
+        if not value:
+            raise SystemExit(f"secret {name} is empty")
+        return value
+
+
+    admin_password = read("admin_passwd")
+    canary_password = read("canary_password")
+
+    admin = env["res.users"].browse(2)
+    if not admin.exists() or admin.login != "admin":
+        admin = env["res.users"].search([("login", "=", "admin")], limit=1)
+    if admin:
+        admin.password = admin_password
+        print("admin password set")
+    else:
+        print("no admin user found; nothing to reset")
+
+    canary = env["res.users"].search([("login", "=", "canary")], limit=1)
+    values = {
+        "name": "Monitoring Canary",
+        "login": "canary",
+        "password": canary_password,
+        # Base access only. A leaked canary credential must not grant anything
+        # an attacker can use; the probe only needs to log in and read itself.
+        # Odoo 19 renamed this field from groups_id to group_ids.
+        "group_ids": [(6, 0, [env.ref("base.group_user").id])],
+    }
+    if canary:
+        canary.write(values)
+        print("canary account updated")
+    else:
+        env["res.users"].create(values)
+        print("canary account created")
+
+    env.cr.commit()
+---
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: {{ $tenant }}-odoo-users
+  namespace: {{ $tenant }}
+  labels:
+    {{- include "odoo.labels" . | nindent 4 }}
+  annotations:
+    helm.sh/hook: post-install,post-upgrade
+    # Weight 1: after the schema init job at weight 0. Setting a password on a
+    # database with no res_users table fails.
+    helm.sh/hook-weight: "1"
+    helm.sh/hook-delete-policy: before-hook-creation
+spec:
+  backoffLimit: 3
+  ttlSecondsAfterFinished: 3600
+  template:
+    metadata:
+      labels:
+        {{- include "odoo.labels" . | nindent 8 }}
+        app.kubernetes.io/component: users
+    spec:
+      restartPolicy: Never
+      automountServiceAccountToken: false
+      securityContext:
+        {{- include "odoo.podSecurityContext" . | nindent 8 }}
+      containers:
+        - name: odoo-users
+          image: "{{ .Values.odoo.image.repository }}:{{ .Values.odoo.image.tag }}"
+          imagePullPolicy: {{ .Values.odoo.image.pullPolicy }}
+          securityContext:
+            {{- include "odoo.containerSecurityContext" . | nindent 12 }}
+          # `odoo shell` reads its script from stdin, so credentials stay in
+          # mounted files and never appear in the process arguments. The
+          # entrypoint still runs first to render the config from the secrets.
+          # Odoo requires its subcommand first (`odoo shell -c ...`), while the
+          # entrypoint execs `odoo --config=... "$@"`. So the entrypoint runs in
+          # render-only mode to produce the config from the mounted secrets, and
+          # `odoo shell` is invoked separately against that rendered file.
+          command: ["/bin/sh", "-c"]
+          args:
+            - >-
+              RENDER_ONLY=1 /usr/local/bin/odoo-entrypoint.sh &&
+              odoo shell -c /etc/odoo-rendered/odoo.conf -d {{ $tenant }}
+              < /etc/odoo-scripts/provision_users.py
+          env:
+            - name: ODOO_MAX_CRON_THREADS
+              value: "0"
+            - name: ODOO_WORKERS
+              value: "0"
+            - name: ODOO_CONF_TEMPLATE
+              value: /etc/odoo/odoo.conf.template
+            - name: ODOO_CONF_OUT
+              value: /etc/odoo-rendered/odoo.conf
+            - name: SECRETS_PATH
+              value: /etc/odoo-secrets
+          resources:
+            requests: { cpu: 100m, memory: 512Mi }
+            limits: { cpu: "1", memory: 1Gi }
+          volumeMounts:
+            - { name: config, mountPath: /etc/odoo, readOnly: true }
+            - { name: rendered-config, mountPath: /etc/odoo-rendered }
+            - { name: db-credentials, mountPath: /etc/odoo-secrets, readOnly: true }
+            - { name: script, mountPath: /etc/odoo-scripts, readOnly: true }
+            - { name: filestore, mountPath: /var/lib/odoo }
+            - { name: tmp, mountPath: /tmp }
+      volumes:
+        - name: config
+          configMap:
+            name: {{ $tenant }}-odoo-config
+        - name: rendered-config
+          emptyDir: { medium: Memory }
+        {{- include "odoo.credentialVolume" . | nindent 8 }}
+        - name: script
+          configMap:
+            name: {{ $tenant }}-odoo-users-script
+        - name: filestore
+          persistentVolumeClaim:
+            claimName: {{ $tenant }}-filestore
+        - name: tmp
+          emptyDir: {}

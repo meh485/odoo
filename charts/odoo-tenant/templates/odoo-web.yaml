@@ -98,18 +98,7 @@ spec:
         # writable home of its own.
         - name: rendered-config
           emptyDir: { medium: Memory }
-        - name: db-credentials
-          projected:
-            defaultMode: 0400
-            sources:
-              - secret:
-                  name: {{ $tenant }}-db-app
-                  items:
-                    - { key: password, path: db_password }
-              - secret:
-                  name: {{ $tenant }}-odoo-admin
-                  items:
-                    - { key: admin_passwd, path: admin_passwd }
+        {{- include "odoo.credentialVolume" . | nindent 8 }}
         - name: filestore
           persistentVolumeClaim:
             claimName: {{ $tenant }}-filestore

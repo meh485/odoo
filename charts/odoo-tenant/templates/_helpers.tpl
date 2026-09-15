@@ -36,3 +36,24 @@ readOnlyRootFilesystem: true
 capabilities:
   drop: [ALL]
 {{- end -}}
+
+{{/* Credentials projected into one directory. Two Secrets cannot mount at the
+     same path, and no password may reach an environment variable. */}}
+{{- define "odoo.credentialVolume" -}}
+- name: db-credentials
+  projected:
+    defaultMode: 0400
+    sources:
+      - secret:
+          name: {{ include "odoo.tenant" . }}-db-app
+          items:
+            - { key: password, path: db_password }
+      - secret:
+          name: {{ include "odoo.tenant" . }}-odoo-admin
+          items:
+            - { key: admin_passwd, path: admin_passwd }
+      - secret:
+          name: {{ include "odoo.tenant" . }}-canary
+          items:
+            - { key: canary_password, path: canary_password }
+{{- end -}}
