@@ -1,0 +1,311 @@
+# Platform-owned object storage: the destination for every tenant's CloudNativePG
+# backups. Applied with `kubectl apply -f platform/storage/`, never by Helm.
+#
+# One-time bootstrap (mirrors the imperative odoo-edge-tls secret in
+# platform/gateway): create the root credential BEFORE applying so the pods
+# start with valid auth, and pass the same values to each tenant chart as
+# backup.accessKeyId / backup.secretAccessKey:
+#
+#   kubectl create secret generic minio-credentials -n storage \
+#     --from-literal=ACCESS_KEY_ID=$(openssl rand -hex 12) \
+#     --from-literal=ACCESS_SECRET_KEY=$(openssl rand -hex 24)
+#
+# In production this Secret is supplied by External Secrets Operator from Vault,
+# and this namespace's policies are the same ones the object store would get in
+# the platform environment.
+
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: storage
+  labels:
+    pod-security.kubernetes.io/enforce: restricted
+    pod-security.kubernetes.io/enforce-version: v1.34
+    pod-security.kubernetes.io/audit: restricted
+    pod-security.kubernetes.io/warn: restricted
+---
+# Deny everything inside storage, then permit only the named flows below.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: storage-default-deny
+  namespace: storage
+spec:
+  podSelector: {}
+  policyTypes: [Ingress, Egress]
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: storage-allow-dns
+  namespace: storage
+spec:
+  podSelector: {}
+  policyTypes: [Egress]
+  egress:
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: kube-system
+          podSelector:
+            matchLabels:
+              k8s-app: kube-dns
+      ports:
+        - { protocol: UDP, port: 53 }
+        - { protocol: TCP, port: 53 }
+---
+# Tenants reach MinIO for WAL archiving, and the bucket-creation Job within
+# this namespace reaches it once. The tenant's own egress policy keeps the
+# first flow to the Postgres pods; this storage-side policy is the accepting
+# half of both named flows and never originates one.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: storage-allow-minio-api
+  namespace: storage
+spec:
+  podSelector:
+    matchLabels:
+      app: minio
+  policyTypes: [Ingress]
+  ingress:
+    - from:
+        # The accepting half of the tenant WAL-archiving flow.
+        - namespaceSelector:
+            matchLabels:
+              app.kubernetes.io/name: odoo
+      ports:
+        - { protocol: TCP, port: 9000 }
+    - from:
+        # The bucket-creation Job in this same namespace.
+        - podSelector:
+            matchLabels:
+              app: minio-bucket-init
+      ports:
+        - { protocol: TCP, port: 9000 }
+---
+# The bucket-creation Job must reach the MinIO API within this namespace, and
+# DNS (covered above) to resolve the Service name.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: storage-allow-bucket-job-to-minio
+  namespace: storage
+spec:
+  podSelector:
+    matchLabels:
+      app: minio-bucket-init
+  policyTypes: [Egress]
+  egress:
+    - to:
+        - podSelector:
+            matchLabels:
+              app: minio
+      ports:
+        - { protocol: TCP, port: 9000 }
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: minio-data
+  namespace: storage
+spec:
+  accessModes: [ReadWriteOnce]
+  resources:
+    requests:
+      storage: 10Gi
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: minio
+  namespace: storage
+  labels:
+    app: minio
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: minio
+  template:
+    metadata:
+      labels:
+        app: minio
+    spec:
+      automountServiceAccountToken: false
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1001
+        runAsGroup: 1001
+        fsGroup: 1001
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: minio
+          # Pinned, not :latest. Same hardened shape as every tenant workload.
+          image: quay.io/minio/minio:RELEASE.2025-04-22T22-12-26Z
+          imagePullPolicy: IfNotPresent
+          args:
+            - server
+            - /data
+            - --console-address
+            - ":9001"
+          env:
+            # The root filesystem is read-only; MinIO writes its server
+            # config under $HOME, so point it at the writable emptyDir.
+            - name: HOME
+              value: /tmp
+            # Credentials arrive as files, never as environment variables:
+            # the *-FILE forms point MinIO at the mounted secret paths.
+            - name: MINIO_ROOT_USER_FILE
+              value: /etc/minio-credentials/ACCESS_KEY_ID
+            - name: MINIO_ROOT_PASSWORD_FILE
+              value: /etc/minio-credentials/ACCESS_SECRET_KEY
+          ports:
+            - name: api
+              containerPort: 9000
+            - name: console
+              containerPort: 9001
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: [ALL]
+          resources:
+            requests: { cpu: 100m, memory: 256Mi }
+            limits: { cpu: 500m, memory: 1Gi }
+          volumeMounts:
+            - { name: data, mountPath: /data }
+            - { name: minio-credentials, mountPath: /etc/minio-credentials, readOnly: true }
+            - { name: tmp, mountPath: /tmp }
+          readinessProbe:
+            httpGet:
+              path: /minio/health/ready
+              port: api
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          livenessProbe:
+            httpGet:
+              path: /minio/health/live
+              port: api
+            initialDelaySeconds: 10
+            periodSeconds: 30
+      volumes:
+        - name: data
+          persistentVolumeClaim:
+            claimName: minio-data
+        - name: minio-credentials
+          secret:
+            secretName: minio-credentials
+            defaultMode: 0400
+        - name: tmp
+          emptyDir: {}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: minio
+  namespace: storage
+  labels:
+    app: minio
+spec:
+  selector:
+    app: minio
+  ports:
+    - name: api
+      port: 9000
+      targetPort: api
+---
+# Creates the shared bucket once. mc reads its alias configuration from the
+# files mounted from the same Secret the server authenticates against, so the
+# credential is never an argument or an environment variable.
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: minio-create-bucket
+  namespace: storage
+  labels:
+    app: minio-bucket-init
+spec:
+  template:
+    metadata:
+      labels:
+        app: minio-bucket-init
+    spec:
+      restartPolicy: OnFailure
+      automountServiceAccountToken: false
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1001
+        runAsGroup: 1001
+        fsGroup: 1001
+        seccompProfile:
+          type: RuntimeDefault
+      initContainers:
+        - name: write-mc-config
+          image: quay.io/minio/mc:RELEASE.2025-04-16T18-13-26Z
+          imagePullPolicy: IfNotPresent
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: [ALL]
+          env:
+            - name: HOME
+              value: /tmp
+          command: ["/bin/sh", "-c"]
+          args:
+            - |
+              set -e
+              mkdir -p "$HOME/.mc"
+              printf '%s\n' '{' \
+                '  "version": "10",' \
+                '  "aliases": {' \
+                '    "backup": {' \
+                '      "url": "http://minio.storage.svc.cluster.local:9000",' \
+                '      "accessKey": "'"$(cat /etc/minio-credentials/ACCESS_KEY_ID)"'",' \
+                '      "secretKey": "'"$(cat /etc/minio-credentials/ACCESS_SECRET_KEY)"'",' \
+                '      "api": "s3v4",' \
+                '      "path": "auto"' \
+                '    }' \
+                '  }' \
+                '}' > "$HOME/.mc/config.json"
+              chmod 600 "$HOME/.mc/config.json"
+          resources:
+            requests: { cpu: 10m, memory: 32Mi }
+            limits: { cpu: 100m, memory: 64Mi }
+          volumeMounts:
+            - { name: minio-credentials, mountPath: /etc/minio-credentials, readOnly: true }
+            - { name: tmp, mountPath: /tmp }
+      containers:
+        - name: mc
+          image: quay.io/minio/mc:RELEASE.2025-04-16T18-13-26Z
+          imagePullPolicy: IfNotPresent
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: [ALL]
+          env:
+            - name: HOME
+              value: /tmp
+          command: ["/bin/sh", "-c"]
+          args:
+            - |
+              set -e
+              # --ignore-existing makes a rerun a no-op rather than a failure,
+              # so the Job completes cleanly after the bucket already exists
+              # instead of leaving pods in a failed state that alerts.
+              mc --config-dir "$HOME/.mc" mb --ignore-existing backup/odoo-backups
+          resources:
+            requests: { cpu: 10m, memory: 32Mi }
+            limits: { cpu: 100m, memory: 64Mi }
+          volumeMounts:
+            - { name: tmp, mountPath: /tmp }
+      volumes:
+        - name: minio-credentials
+          secret:
+            secretName: minio-credentials
+            defaultMode: 0400
+        - name: tmp
+          emptyDir: {}

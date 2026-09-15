@@ -67,8 +67,17 @@ backup:
   enabled: false
   destinationPath: ""
   endpointURL: ""
-  schedule: "0 2 * * *"
+  # CloudNativePG uses the Go cron format, which includes a seconds field.
+  # Kubernetes CronJob expressions are five fields and would run at the wrong
+  # time here -- a five-field entry is accepted, not rejected.
+  schedule: "0 0 2 * * *"
   retentionPolicy: "30d"
+  # Where a platform team manages the object store, supply the credential here
+  # so the rendered Secret matches what the store accepts. When both are empty
+  # the chart generates a Secret and preserves it across upgrades; the platform
+  # must then be provisioned with the same values.
+  accessKeyId: ""
+  secretAccessKey: ""
 
 gateway:
   # The shared Gateway the platform team owns. Tenants attach to it.

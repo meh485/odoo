@@ -1,0 +1,17 @@
+{{- $tenant := include "odoo.tenant" . }}
+{{- if .Values.backup.enabled }}
+apiVersion: postgresql.cnpg.io/v1
+kind: ScheduledBackup
+metadata:
+  name: {{ $tenant }}-daily
+  namespace: {{ $tenant }}
+  labels:
+    {{- include "odoo.labels" . | nindent 4 }}
+spec:
+  # CloudNativePG cron includes seconds; a five-field entry is accepted but
+  # runs at the wrong time. The default in values.yaml ("0 0 2 * * *") is
+  # 02:00:00 daily, outside every tenant's busy window.
+  schedule: {{ .Values.backup.schedule | quote }}
+  cluster:
+    name: {{ $tenant }}-db
+{{- end }}
