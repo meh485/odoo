@@ -1,0 +1,17 @@
+tenant:
+  name: beta
+  hostname: beta.odoo.local
+
+odoo:
+  web:
+    replicas: 1
+    workers: 2
+
+postgres:
+  instances: 1
+
+backup:
+  # Credentials are seeded from the object store's credential, not committed.
+  enabled: true
+  destinationPath: "s3://odoo-backups/beta"
+  endpointURL: "http://minio.storage.svc.cluster.local:9000"

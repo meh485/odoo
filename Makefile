@@ -18,15 +18,18 @@ cluster: ## Create the local kind cluster
 platform: ## Install operators and platform-wide resources
 	@scripts/platform-install.sh
 
+# No --wait on the upgrade: Helm can deadlock waiting on the post-install
+# hooks on a local cluster and leave the release stuck in pending-upgrade.
+# Watch the release with `helm status` and `kubectl get pods` instead.
 .PHONY: tenant
 tenant: ## Install or upgrade a tenant: make tenant TENANT=acme
+	@test -n "$(TENANT)" || { echo "TENANT is required, e.g. make tenant TENANT=acme"; exit 1; }
+	@test -f tenants/$(TENANT).yaml || { echo "no tenants/$(TENANT).yaml to install"; exit 1; }
+	@kubectl create namespace "$(TENANT)" --dry-run=client -o yaml | kubectl apply -f - >/dev/null
+	@scripts/seed-backup-credentials.sh "$(TENANT)"
 	@helm upgrade --install "$(TENANT)" $(CHART) \
-		--namespace "$(TENANT)" --create-namespace \
-		--values tenants/$(TENANT).yaml --wait
-
-.PHONY: secrets
-secrets: ## Generate secrets for a tenant: make secrets TENANT=acme
-	@scripts/secrets-generate.sh "$(TENANT)"
+		--namespace "$(TENANT)" \
+		--values tenants/$(TENANT).yaml
 
 .PHONY: lint
 lint: ## Lint the chart

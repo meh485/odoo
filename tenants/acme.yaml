@@ -1,0 +1,28 @@
+tenant:
+  name: acme
+  hostname: acme.odoo.local
+
+odoo:
+  web:
+    # One replica locally; production runs two or more behind the gateway.
+    replicas: 1
+    workers: 2
+
+postgres:
+  instances: 1
+
+backup:
+  # No credentials here on purpose. The chart preserves an existing
+  # {tenant}-backup-credentials Secret, and the platform seeds it from the
+  # object store's own credential. Putting one in this file would commit a
+  # live key.
+  enabled: true
+  destinationPath: "s3://odoo-backups/acme"
+  endpointURL: "http://minio.storage.svc.cluster.local:9000"
+
+network:
+  egress:
+    internet:
+      # The in-app module browser and payment/OAuth callbacks reach out.
+      # Enabled for this tenant; the chart default stays false.
+      enabled: true
