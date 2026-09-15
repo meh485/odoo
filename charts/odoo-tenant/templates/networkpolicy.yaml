@@ -193,3 +193,55 @@ spec:
       ports:
         - { protocol: TCP, port: {{ .Values.network.backupPort }} }
 {{- end }}
+{{- if .Values.network.egress.smtp.enabled }}
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ $tenant }}-allow-egress-smtp
+  namespace: {{ $tenant }}
+  labels:
+    {{- include "odoo.labels" . | nindent 4 }}
+spec:
+  podSelector:
+    matchLabels:
+      {{- include "odoo.selectorLabels" . | nindent 6 }}
+  policyTypes: [Egress]
+  egress:
+    - to:
+        - ipBlock:
+            cidr: {{ required "network.egress.smtp.cidr is required when smtp egress is enabled" .Values.network.egress.smtp.cidr | quote }}
+      ports:
+        - { protocol: TCP, port: {{ .Values.network.egress.smtp.port }} }
+{{- end }}
+{{- if .Values.network.egress.internet.enabled }}
+---
+# Opt-in outbound access for the in-app module browser and similar features.
+# Private ranges and the cloud metadata endpoint stay excluded, so enabling
+# this never grants reach into the cluster or to the node's credentials.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ $tenant }}-allow-egress-internet
+  namespace: {{ $tenant }}
+  labels:
+    {{- include "odoo.labels" . | nindent 4 }}
+spec:
+  podSelector:
+    matchLabels:
+      {{- include "odoo.selectorLabels" . | nindent 6 }}
+  policyTypes: [Egress]
+  egress:
+    - to:
+        - ipBlock:
+            cidr: 0.0.0.0/0
+            except:
+              - 10.0.0.0/8
+              - 172.16.0.0/12
+              - 192.168.0.0/16
+              - 169.254.169.254/32
+      ports:
+        {{- range .Values.network.egress.internet.ports }}
+        - { protocol: TCP, port: {{ . }} }
+        {{- end }}
+{{- end }}

@@ -63,3 +63,34 @@ def test_no_policy_allows_the_whole_internet(manifests):
                     assert cidr != "0.0.0.0/0", (
                         f"{policy['metadata']['name']} allows all of {direction} to 0.0.0.0/0"
                     )
+
+
+def test_outbound_internet_is_denied_by_default(manifests):
+    # A tenant that can reach arbitrary hosts by default turns any application
+    # compromise into a data exfiltration path.
+    names = {p["metadata"]["name"] for p in by_kind(manifests, "NetworkPolicy")}
+    assert not any("egress-internet" in n for n in names)
+    assert not any("egress-smtp" in n for n in names)
+
+
+def test_enabling_internet_still_excludes_private_ranges_and_metadata():
+    from conftest import helm_template
+    manifests = helm_template({"network": {"egress": {"internet": {"enabled": True}}}})
+    policy = [p for p in by_kind(manifests, "NetworkPolicy")
+              if "egress-internet" in p["metadata"]["name"]][0]
+    block = policy["spec"]["egress"][0]["to"][0]["ipBlock"]
+    excluded = set(block["except"])
+    # The metadata endpoint hands out node credentials; private ranges are the
+    # rest of the cluster. "Internet" must not quietly mean either.
+    assert "169.254.169.254/32" in excluded
+    assert {"10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16"} <= excluded
+
+
+def test_smtp_egress_requires_an_explicit_destination():
+    from conftest import helm_template
+    try:
+        helm_template({"network": {"egress": {"smtp": {"enabled": True}}}})
+    except AssertionError as exc:
+        assert "cidr" in str(exc).lower()
+    else:
+        raise AssertionError("expected SMTP egress without a CIDR to fail rendering")

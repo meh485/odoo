@@ -73,6 +73,29 @@ network:
   backupNamespace: storage
   backupPort: 9000
 
+  egress:
+    # Outbound mail. Named explicitly because a tenant that cannot send mail
+    # looks healthy while invoices silently never arrive.
+    smtp:
+      enabled: false
+      cidr: ""
+      port: 587
+
+    # Odoo's in-app module browser calls apps.odoo.com, and payment or OAuth
+    # integrations call their providers. Blocked by default: unrestricted
+    # egress from an application server is the route data takes after a
+    # compromise, and the module browser is a phone-home to Odoo SA that most
+    # deployments do not want.
+    #
+    # Enable per tenant, and prefer listing the destinations you actually need
+    # over opening everything.
+    internet:
+      enabled: false
+      # Applied only when internet.enabled is true. RFC1918 ranges and the
+      # cloud metadata endpoint stay excluded regardless, so "internet" never
+      # means "the rest of the cluster" or "the node's credentials".
+      ports: [443]
+
 quota:
   # Sized with headroom for a rolling update and the init job, not just for
   # steady state. A quota that exactly fits the running pods blocks its own
