@@ -193,6 +193,55 @@ spec:
       ports:
         - { protocol: TCP, port: {{ .Values.network.backupPort }} }
 {{- end }}
+{{- if .Values.canary.enabled }}
+---
+# The canary must reach the web service it probes. Without this the probe
+# reports the tenant down while the tenant is perfectly healthy -- a false
+# alarm that trains people to ignore the alert.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ $tenant }}-allow-canary-to-web
+  namespace: {{ $tenant }}
+  labels:
+    {{- include "odoo.labels" . | nindent 4 }}
+spec:
+  podSelector:
+    matchLabels:
+      {{- include "odoo.selectorLabels" . | nindent 6 }}
+      app.kubernetes.io/component: canary
+  policyTypes: [Egress]
+  egress:
+    - to:
+        - podSelector:
+            matchLabels:
+              {{- include "odoo.selectorLabels" . | nindent 14 }}
+              app.kubernetes.io/component: web
+      ports:
+        - { protocol: TCP, port: 8069 }
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ $tenant }}-allow-web-from-canary
+  namespace: {{ $tenant }}
+  labels:
+    {{- include "odoo.labels" . | nindent 4 }}
+spec:
+  podSelector:
+    matchLabels:
+      {{- include "odoo.selectorLabels" . | nindent 6 }}
+      app.kubernetes.io/component: web
+  policyTypes: [Ingress]
+  ingress:
+    - from:
+        - podSelector:
+            matchLabels:
+              {{- include "odoo.selectorLabels" . | nindent 14 }}
+              app.kubernetes.io/component: canary
+      ports:
+        - { protocol: TCP, port: 8069 }
+{{- end }}
 {{- if .Values.network.egress.smtp.enabled }}
 ---
 apiVersion: networking.k8s.io/v1

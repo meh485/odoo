@@ -1,0 +1,85 @@
+{{- $tenant := include "odoo.tenant" . }}
+{{- if .Values.canary.enabled }}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ $tenant }}-canary
+  namespace: {{ $tenant }}
+  labels:
+    {{- include "odoo.labels" . | nindent 4 }}
+    app.kubernetes.io/component: canary
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      {{- include "odoo.selectorLabels" . | nindent 6 }}
+      app.kubernetes.io/component: canary
+  template:
+    metadata:
+      labels:
+        {{- include "odoo.labels" . | nindent 8 }}
+        app.kubernetes.io/component: canary
+    spec:
+      automountServiceAccountToken: false
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 10001
+        runAsGroup: 10001
+        # Without fsGroup the projected secret is mode 0400 owned by root and
+        # this container cannot read it; the probe then crash-loops instead of
+        # reporting, which looks like a missing tenant rather than a bug here.
+        fsGroup: 10001
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: canary
+          image: "{{ .Values.canary.image.repository }}:{{ .Values.canary.image.tag }}"
+          imagePullPolicy: {{ .Values.canary.image.pullPolicy }}
+          securityContext:
+            {{- include "odoo.containerSecurityContext" . | nindent 12 }}
+          env:
+            - name: TENANT
+              value: {{ $tenant }}
+            - name: DB_NAME
+              value: {{ $tenant }}
+            # Probes the Service, not a pod, so it exercises the same path a
+            # user takes through kube-proxy rather than one chosen replica.
+            - name: ODOO_URL
+              value: http://{{ $tenant }}-web:8069
+            - name: CANARY_INTERVAL_SECONDS
+              value: {{ .Values.canary.intervalSeconds | quote }}
+            - name: SECRETS_PATH
+              value: /etc/odoo-secrets
+          ports:
+            - name: metrics
+              containerPort: 9101
+          resources:
+            {{- toYaml .Values.canary.resources | nindent 12 }}
+          volumeMounts:
+            - { name: db-credentials, mountPath: /etc/odoo-secrets, readOnly: true }
+      volumes:
+        # Only the canary's own credential, never the projected bundle the
+        # Odoo pods mount. The admin and database passwords are not needed here,
+        # and a compromised probe should not hold them.
+        - name: db-credentials
+          secret:
+            secretName: {{ $tenant }}-canary
+            defaultMode: 0400
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ $tenant }}-canary
+  namespace: {{ $tenant }}
+  labels:
+    {{- include "odoo.labels" . | nindent 4 }}
+    app.kubernetes.io/component: canary
+spec:
+  selector:
+    {{- include "odoo.selectorLabels" . | nindent 4 }}
+    app.kubernetes.io/component: canary
+  ports:
+    - name: metrics
+      port: 9101
+      targetPort: metrics
+{{- end }}

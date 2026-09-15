@@ -49,6 +49,20 @@ postgres:
     maxClientConn: 200
     defaultPoolSize: 25
 
+canary:
+  # Synthetic probe that logs in and reads a record. /web/health returned 200
+  # on this cluster while the database had no schema and every real request
+  # failed, which is why the probe authenticates instead of checking health.
+  enabled: true
+  image:
+    repository: odoo-canary
+    tag: "0.1.0"
+    pullPolicy: IfNotPresent
+  intervalSeconds: 30
+  resources:
+    requests: { cpu: 10m, memory: 64Mi }
+    limits: { cpu: 100m, memory: 128Mi }
+
 backup:
   enabled: false
   destinationPath: ""
