@@ -96,8 +96,9 @@ spec:
       ports:
         - { protocol: TCP, port: 5432 }
 ---
-# The pooler must reach the Postgres instances the operator manages, and the
-# instances must reach each other for replication.
+# Every Postgres instance in the namespace -- the tenant's own cluster and the
+# restore drill's throwaway one -- reaches its peers for replication, accepts
+# the pooler and the drill, and is otherwise reachable on 5432 only.
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
 metadata:
@@ -107,24 +108,28 @@ metadata:
     {{- include "odoo.labels" . | nindent 4 }}
 spec:
   podSelector:
-    matchLabels:
-      cnpg.io/cluster: {{ $tenant }}-db
+    matchExpressions:
+      - { key: cnpg.io/cluster, operator: Exists }
   policyTypes: [Ingress, Egress]
   ingress:
     - from:
         - podSelector:
-            matchLabels:
-              cnpg.io/cluster: {{ $tenant }}-db
+            matchExpressions:
+              - { key: cnpg.io/cluster, operator: Exists }
         - podSelector:
             matchLabels:
               cnpg.io/poolerName: {{ $tenant }}-pooler
+        - podSelector:
+            matchLabels:
+              {{- include "odoo.selectorLabels" . | nindent 14 }}
+              app.kubernetes.io/component: restore-drill
       ports:
         - { protocol: TCP, port: 5432 }
   egress:
     - to:
         - podSelector:
-            matchLabels:
-              cnpg.io/cluster: {{ $tenant }}-db
+            matchExpressions:
+              - { key: cnpg.io/cluster, operator: Exists }
       ports:
         - { protocol: TCP, port: 5432 }
 ---
@@ -185,8 +190,8 @@ metadata:
     {{- include "odoo.labels" . | nindent 4 }}
 spec:
   podSelector:
-    matchLabels:
-      cnpg.io/cluster: {{ $tenant }}-db
+    matchExpressions:
+      - { key: cnpg.io/cluster, operator: Exists }
   policyTypes: [Egress]
   egress:
     - to:
@@ -206,8 +211,8 @@ metadata:
     {{- include "odoo.labels" . | nindent 4 }}
 spec:
   podSelector:
-    matchLabels:
-      cnpg.io/cluster: {{ $tenant }}-db
+    matchExpressions:
+      - { key: cnpg.io/cluster, operator: Exists }
   policyTypes: [Egress]
   egress:
     - to:
@@ -216,6 +221,42 @@ spec:
               kubernetes.io/metadata.name: {{ .Values.network.backupNamespace }}
       ports:
         - { protocol: TCP, port: {{ .Values.network.backupPort }} }
+---
+# The restore drill calls the API to create and delete its scratch Cluster,
+# reads that Cluster on 5432, and pushes its metrics to the Pushgateway.
+# DNS is allowed globally; nothing else leaves the drill pod.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ $tenant }}-allow-restore-drill-egress
+  namespace: {{ $tenant }}
+  labels:
+    {{- include "odoo.labels" . | nindent 4 }}
+spec:
+  podSelector:
+    matchLabels:
+      {{- include "odoo.selectorLabels" . | nindent 6 }}
+      app.kubernetes.io/component: restore-drill
+  policyTypes: [Egress]
+  egress:
+    - to:
+        - ipBlock:
+            cidr: {{ required "network.apiServerCIDR is required" .Values.network.apiServerCIDR | quote }}
+      ports:
+        - { protocol: TCP, port: {{ .Values.network.apiServerPort }} }
+        - { protocol: TCP, port: 443 }
+    - to:
+        - podSelector:
+            matchExpressions:
+              - { key: cnpg.io/cluster, operator: Exists }
+      ports:
+        - { protocol: TCP, port: 5432 }
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: {{ .Values.network.pushgatewayNamespace }}
+      ports:
+        - { protocol: TCP, port: {{ .Values.network.pushgatewayPort }} }
 {{- end }}
 {{- if .Values.canary.enabled }}
 ---

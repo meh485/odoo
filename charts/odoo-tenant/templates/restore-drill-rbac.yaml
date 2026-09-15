@@ -1,0 +1,48 @@
+{{- $tenant := include "odoo.tenant" . }}
+{{- if .Values.backup.enabled }}
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: {{ $tenant }}-restore-drill
+  namespace: {{ $tenant }}
+  labels:
+    {{- include "odoo.labels" . | nindent 4 }}
+    app.kubernetes.io/component: restore-drill
+---
+# Scoped to this namespace and to the two resources the drill touches: it may
+# create and delete its own scratch Cluster, and read only that Cluster's
+# credential. No cluster-scoped grant, no wildcard verbs.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: {{ $tenant }}-restore-drill
+  namespace: {{ $tenant }}
+  labels:
+    {{- include "odoo.labels" . | nindent 4 }}
+    app.kubernetes.io/component: restore-drill
+rules:
+  - apiGroups: ["postgresql.cnpg.io"]
+    resources: ["clusters"]
+    verbs: ["get", "list", "watch", "create", "delete"]
+  - apiGroups: [""]
+    resources: ["secrets"]
+    verbs: ["get"]
+    resourceNames: ["{{ $tenant }}-restore-scratch-app"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: {{ $tenant }}-restore-drill
+  namespace: {{ $tenant }}
+  labels:
+    {{- include "odoo.labels" . | nindent 4 }}
+    app.kubernetes.io/component: restore-drill
+subjects:
+  - kind: ServiceAccount
+    name: {{ $tenant }}-restore-drill
+    namespace: {{ $tenant }}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: {{ $tenant }}-restore-drill
+{{- end }}

@@ -78,6 +78,13 @@ backup:
   # must then be provisioned with the same values.
   accessKeyId: ""
   secretAccessKey: ""
+  drillImage:
+    repository: odoo-restore-drill
+    tag: "0.1.0"
+    pullPolicy: IfNotPresent
+  # Weekly, at 04:00, clear of the 02:00 backup window. A restore running while
+  # the base backup it depends on is being written would prove nothing.
+  drillSchedule: "0 4 * * 0"
 
 gateway:
   # The shared Gateway the platform team owns. Tenants attach to it.
@@ -95,6 +102,10 @@ network:
   apiServerPort: 6443
   backupNamespace: storage
   backupPort: 9000
+  # Where the restore drill pushes its metrics. Batch jobs cannot be scraped
+  # directly, so they push and Prometheus scrapes the Pushgateway.
+  pushgatewayNamespace: monitoring
+  pushgatewayPort: 9091
 
   egress:
     # Outbound mail. Named explicitly because a tenant that cannot send mail

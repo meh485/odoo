@@ -1,0 +1,63 @@
+{{- $tenant := include "odoo.tenant" . }}
+{{- if .Values.backup.enabled }}
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: {{ $tenant }}-restore-drill
+  namespace: {{ $tenant }}
+  labels:
+    {{- include "odoo.labels" . | nindent 4 }}
+    app.kubernetes.io/component: restore-drill
+spec:
+  schedule: {{ .Values.backup.drillSchedule | quote }}
+  # Two restores at once would each create a scratch Cluster and exhaust the
+  # namespace quota; they could also delete each other's scratch Cluster.
+  concurrencyPolicy: Forbid
+  startingDeadlineSeconds: 3600
+  successfulJobsHistoryLimit: 3
+  failedJobsHistoryLimit: 3
+  jobTemplate:
+    spec:
+      backoffLimit: 0
+      ttlSecondsAfterFinished: 86400
+      template:
+        metadata:
+          labels:
+            {{- include "odoo.labels" . | nindent 12 }}
+            app.kubernetes.io/component: restore-drill
+        spec:
+          serviceAccountName: {{ $tenant }}-restore-drill
+          restartPolicy: Never
+          # The drill must call the API to create and delete its scratch
+          # Cluster; its ServiceAccount is scoped to those calls alone.
+          automountServiceAccountToken: true
+          securityContext:
+            {{- include "odoo.podSecurityContext" . | nindent 12 }}
+          containers:
+            - name: drill
+              image: "{{ .Values.backup.drillImage.repository }}:{{ .Values.backup.drillImage.tag }}"
+              imagePullPolicy: {{ .Values.backup.drillImage.pullPolicy }}
+              securityContext:
+                {{- include "odoo.containerSecurityContext" . | nindent 16 }}
+              env:
+                - { name: TENANT, value: {{ $tenant | quote }} }
+                - { name: SCRATCH_CLUSTER, value: "{{ $tenant }}-restore-scratch" }
+                - { name: SOURCE_CLUSTER, value: "{{ $tenant }}-db" }
+                - { name: DB_NAME, value: {{ $tenant | quote }} }
+                - { name: BACKUP_DESTINATION_PATH, value: {{ .Values.backup.destinationPath | quote }} }
+                - { name: BACKUP_ENDPOINT_URL, value: {{ .Values.backup.endpointURL | quote }} }
+                - { name: BACKUP_CREDENTIALS_SECRET, value: "{{ $tenant }}-backup-credentials" }
+                - { name: PUSHGATEWAY_URL, value: "http://pushgateway.{{ .Values.network.pushgatewayNamespace }}.svc.cluster.local:{{ .Values.network.pushgatewayPort }}" }
+                - { name: MAX_WAIT_SECONDS, value: "900" }
+                # psql writes nothing under a read-only root; a writable HOME
+                # also holds the 0600 pgpass file.
+                - { name: HOME, value: /tmp }
+              resources:
+                requests: { cpu: 50m, memory: 128Mi }
+                limits: { cpu: 500m, memory: 256Mi }
+              volumeMounts:
+                - { name: tmp, mountPath: /tmp }
+          volumes:
+            - name: tmp
+              emptyDir: {}
+{{- end }}
