@@ -1,0 +1,61 @@
+# Every value a tenant may override. A tenant's values file in tenants/
+# should need only a handful of these.
+
+tenant:
+  # Becomes the namespace name and the Odoo database name.
+  name: ""
+  hostname: ""
+
+odoo:
+  image:
+    repository: odoo
+    tag: "19.0"
+    pullPolicy: IfNotPresent
+  web:
+    replicas: 2
+    workers: 2
+    resources:
+      requests: { cpu: 250m, memory: 1Gi }
+      limits: { cpu: "2", memory: 2Gi }
+  cron:
+    # Separate from web: a long-running scheduled job in the web process
+    # competes with user requests for the same workers.
+    replicas: 1
+    maxCronThreads: 2
+    resources:
+      requests: { cpu: 100m, memory: 512Mi }
+      limits: { cpu: "1", memory: 1Gi }
+  filestore:
+    size: 10Gi
+    storageClass: ""
+  logLevel: info
+
+postgres:
+  instances: 2
+  storage:
+    size: 20Gi
+    storageClass: ""
+  resources:
+    requests: { cpu: 250m, memory: 1Gi }
+    limits: { cpu: "2", memory: 2Gi }
+  pooler:
+    instances: 1
+    # Session pooling, never transaction: Odoo relies on prepared statements
+    # and session state, which transaction pooling breaks intermittently.
+    poolMode: session
+    maxClientConn: 200
+    defaultPoolSize: 25
+
+backup:
+  enabled: false
+  destinationPath: ""
+  endpointURL: ""
+  schedule: "0 2 * * *"
+  retentionPolicy: "30d"
+
+quota:
+  requestsCPU: "4"
+  requestsMemory: 6Gi
+  limitsCPU: "8"
+  limitsMemory: 10Gi
+  persistentVolumeClaims: "6"

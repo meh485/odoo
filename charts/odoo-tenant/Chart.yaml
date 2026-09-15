@@ -1,0 +1,6 @@
+apiVersion: v2
+name: odoo-tenant
+description: A hardened, observable, restorable Odoo deployment for one customer
+type: application
+version: 0.1.0
+appVersion: "19.0"

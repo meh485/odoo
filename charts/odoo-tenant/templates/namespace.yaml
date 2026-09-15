@@ -1,0 +1,7 @@
+{{- $tenant := include "odoo.tenant" . }}
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: {{ $tenant }}
+  labels:
+    {{- include "odoo.labels" . | nindent 4 }}

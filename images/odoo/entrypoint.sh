@@ -10,7 +10,7 @@ SECRETS_PATH="${SECRETS_PATH:-/run/secrets}"
 ODOO_CONF_OUT="${ODOO_CONF_OUT:-/tmp/odoo/odoo.conf}"
 
 read_secret() {
-  local name="$1" path="${SECRETS_PATH}/$1"
+  local path="${SECRETS_PATH}/$1"
   [[ -s "$path" ]] || { echo "missing secret: ${path}" >&2; exit 1; }
   tr -d '\n' < "$path"
 }
