@@ -1,0 +1,41 @@
+# kind has no cloud load balancer, so a LoadBalancer Service never receives an
+# address and the Gateway stays Programmed=False forever. A NodePort matching
+# the cluster's port mapping makes the gateway reachable locally.
+#
+# The generated Service uses externalTrafficPolicy: Local, which preserves the
+# client source IP and is the right default. It also means only nodes actually
+# running an Envoy pod answer on the NodePort. The kind port mapping lives on
+# the control-plane node, so Envoy is pinned there; otherwise external traffic
+# arrives at a node with no local endpoint and is silently dropped.
+#
+# In a real cluster this whole file is replaced by the cloud provider's
+# LoadBalancer configuration and neither the pinning nor the NodePort applies.
+# Nothing in the tenant chart changes either way.
+apiVersion: gateway.envoyproxy.io/v1alpha1
+kind: EnvoyProxy
+metadata:
+  name: odoo-edge-proxy
+  namespace: envoy-gateway-system
+spec:
+  provider:
+    type: Kubernetes
+    kubernetes:
+      envoyService:
+        type: NodePort
+        patch:
+          type: StrategicMerge
+          value:
+            spec:
+              ports:
+                - name: http-80
+                  port: 80
+                  targetPort: 10080
+                  nodePort: 30080
+      envoyDeployment:
+        pod:
+          nodeSelector:
+            kubernetes.io/hostname: odoo-control-plane
+          tolerations:
+            - key: node-role.kubernetes.io/control-plane
+              operator: Exists
+              effect: NoSchedule

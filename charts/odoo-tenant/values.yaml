@@ -56,6 +56,11 @@ backup:
   schedule: "0 2 * * *"
   retentionPolicy: "30d"
 
+gateway:
+  # The shared Gateway the platform team owns. Tenants attach to it.
+  name: odoo-edge
+  namespace: envoy-gateway-system
+
 network:
   # Postgres instances must reach the Kubernetes API (the CloudNativePG
   # instance manager) and object storage (WAL archiving). Both are named

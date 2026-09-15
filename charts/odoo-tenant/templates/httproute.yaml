@@ -1,0 +1,53 @@
+{{- $tenant := include "odoo.tenant" . }}
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: {{ $tenant }}
+  namespace: {{ $tenant }}
+  labels:
+    {{- include "odoo.labels" . | nindent 4 }}
+spec:
+  parentRefs:
+    - name: {{ .Values.gateway.name }}
+      namespace: {{ .Values.gateway.namespace }}
+  hostnames:
+    - {{ required "tenant.hostname is required" .Values.tenant.hostname | quote }}
+  rules:
+    # Odoo's database manager permits unauthenticated database creation,
+    # duplication and restore. list_db=False disables it in the application;
+    # returning 404 here means a configuration regression alone is not enough
+    # to expose it. No backendRef, so the request never reaches Odoo.
+    - matches:
+        - path: { type: PathPrefix, value: /web/database }
+      filters:
+        - type: ResponseHeaderModifier
+          responseHeaderModifier:
+            set:
+              - name: Cache-Control
+                value: no-store
+        - type: RequestRedirect
+          requestRedirect:
+            statusCode: 302
+            path:
+              type: ReplaceFullPath
+              replaceFullPath: /
+
+    # Odoo's bus uses long-lived connections. A default timeout silently breaks
+    # live updates, which presents as a UI that quietly stops refreshing.
+    - matches:
+        - path: { type: PathPrefix, value: /websocket }
+      backendRefs:
+        - name: {{ $tenant }}-web
+          port: 8072
+      timeouts:
+        request: "3600s"
+        backendRequest: "3600s"
+
+    - matches:
+        - path: { type: PathPrefix, value: / }
+      backendRefs:
+        - name: {{ $tenant }}-web
+          port: 8069
+      timeouts:
+        request: "720s"
+        backendRequest: "720s"

@@ -1,0 +1,19 @@
+# Owned by the platform team. Tenants attach their own HTTPRoute from their own
+# namespace and never edit this object, which is the ownership split that makes
+# Gateway API a better fit than Ingress at several hundred customers.
+apiVersion: gateway.networking.k8s.io/v1
+kind: Gateway
+metadata:
+  name: odoo-edge
+  namespace: envoy-gateway-system
+spec:
+  gatewayClassName: envoy
+  listeners:
+    - name: http
+      protocol: HTTP
+      port: 80
+      allowedRoutes:
+        namespaces:
+          # Any tenant namespace may attach. Which hostnames a tenant may claim
+          # is enforced by the chart pinning one hostname per route.
+          from: All
