@@ -53,6 +53,24 @@ spec:
     - port: metrics
       interval: 30s
 ---
+# The database-domain exporter, which surfaces the Odoo-level silent failures
+# that CloudNativePG's metrics cannot see.
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: {{ $tenant }}-sql-exporter
+  namespace: {{ $tenant }}
+  labels:
+    {{- include "odoo.labels" . | nindent 4 }}
+spec:
+  selector:
+    matchLabels:
+      {{- include "odoo.selectorLabels" . | nindent 6 }}
+      app.kubernetes.io/component: sql-exporter
+  endpoints:
+    - port: metrics
+      interval: 30s
+---
 # The silent-failure catalogue: the conditions where Odoo keeps serving while
 # something important has quietly stopped. These are the alerts that fire when
 # nobody is watching a graph.
@@ -122,4 +140,43 @@ spec:
             severity: warning
           annotations:
             summary: "The canary has not run for {{ $tenant }} in over 10 minutes"
+    - name: {{ $tenant }}.odoo-domain
+      rules:
+        # These fire on Odoo's own data, where the application looks healthy
+        # while work has quietly stopped.
+        - alert: OdooCronStalled
+          expr: odoo_cron_overdue_seconds{namespace="{{ $tenant }}"} > 7200
+          for: 15m
+          labels:
+            severity: critical
+          annotations:
+            summary: "Scheduled jobs for {{ $tenant }} are over two hours overdue"
+        - alert: OdooMailQueueStalled
+          expr: odoo_mail_outgoing_age_seconds{namespace="{{ $tenant }}"} > 1800
+          for: 15m
+          labels:
+            severity: warning
+          annotations:
+            summary: "Email for {{ $tenant }} has been queued for over 30 minutes"
+        - alert: OdooMailBacklog
+          expr: odoo_mail_queue_depth{namespace="{{ $tenant }}"} > 100
+          for: 10m
+          labels:
+            severity: warning
+          annotations:
+            summary: "The outbound mail queue for {{ $tenant }} is over 100"
+        - alert: OdooAttachmentDrift
+          expr: abs(odoo_attachment_filestore{namespace="{{ $tenant }}"} - (odoo_attachment_total{namespace="{{ $tenant }}"} - odoo_attachment_database{namespace="{{ $tenant }}"})) > 10
+          for: 30m
+          labels:
+            severity: warning
+          annotations:
+            summary: "Attachments and their rows disagree for {{ $tenant }}"
+        - alert: OdooLockContention
+          expr: pg_blocked_query_age_seconds{namespace="{{ $tenant }}"} > 300
+          for: 10m
+          labels:
+            severity: warning
+          annotations:
+            summary: "A query for {{ $tenant }} has been blocked for over 5 minutes"
 {{- end }}

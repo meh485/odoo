@@ -1,0 +1,181 @@
+{{- $tenant := include "odoo.tenant" . }}
+{{- if .Values.observability.enabled }}
+# The database-domain silent failures -- a stalled scheduler, mail that queues
+# while Odoo looks healthy, attachments drifting from their rows, a query
+# blocked behind a lock -- are not visible to CloudNativePG's metrics. A small
+# exporter runs the queries and exposes the answers as gauges.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ $tenant }}-sql-exporter
+  namespace: {{ $tenant }}
+  labels:
+    {{- include "odoo.labels" . | nindent 4 }}
+    app.kubernetes.io/component: sql-exporter
+data:
+  run.sh: |
+    #!/bin/sh
+    # Build the exporter config at runtime so the credential is a file, never
+    # an argument or an environment variable, then hand over to sql_exporter.
+    set -eu
+    CREDENTIALS_DIR="${CREDENTIALS_DIR:-/etc/db-credentials}"
+    CONFIG_OUT="${CONFIG_OUT:-/tmp/sql-exporter}"
+    mkdir -p "$CONFIG_OUT"
+    # CloudNativePG publishes a ready-made URI; using it avoids hand-encoding a
+    # password that may contain special characters.
+    if [ -s "${CREDENTIALS_DIR}/uri" ]; then
+      cp "${CREDENTIALS_DIR}/uri" "${CONFIG_OUT}/uri"
+      chmod 600 "${CONFIG_OUT}/uri"
+      dsn="$(cat "${CONFIG_OUT}/uri")"
+    else
+      dsn="postgresql://$(cat "${CREDENTIALS_DIR}/user"):$(cat "${CREDENTIALS_DIR}/password")@$(cat "${CREDENTIALS_DIR}/host"):$(cat "${CREDENTIALS_DIR}/port")/$(cat "${CREDENTIALS_DIR}/dbname")"
+    fi
+    {
+      printf 'target:\n'
+      printf '  data_source_name: "%s"\n' "$dsn"
+      printf '  collectors: [odoo_cron, odoo_mail, odoo_attachment, pg_locks]\n'
+      printf 'collector_files: ["/etc/sql-exporter/*.collector.yml"]\n'
+    } > "${CONFIG_OUT}/sql_exporter.yml"
+    chmod 600 "${CONFIG_OUT}/sql_exporter.yml"
+    exec sql_exporter \
+      -config.file="${CONFIG_OUT}/sql_exporter.yml" \
+      -web.listen-address=:9399
+  odoo_cron.collector.yml: |
+    collector_name: odoo_cron
+    metrics:
+      - metric_name: odoo_cron_overdue_seconds
+        type: gauge
+        help: "Seconds the oldest active scheduled job is overdue."
+        values: [overdue_seconds]
+        query: |
+          SELECT COALESCE(MAX(EXTRACT(EPOCH FROM (NOW() - nextcall))), 0)::float8 AS overdue_seconds
+          FROM ir_cron
+          WHERE active AND nextcall < NOW()
+  odoo_mail.collector.yml: |
+    collector_name: odoo_mail
+    metrics:
+      - metric_name: odoo_mail_outgoing_age_seconds
+        type: gauge
+        help: "Age in seconds of the oldest email still queued to send."
+        values: [age_seconds]
+        query: |
+          SELECT COALESCE(MAX(EXTRACT(EPOCH FROM (NOW() - create_date))), 0)::float8 AS age_seconds
+          FROM mail_mail
+          WHERE state = 'outgoing'
+      - metric_name: odoo_mail_queue_depth
+        type: gauge
+        help: "Number of emails waiting to be sent."
+        values: [queue_depth]
+        query: |
+          SELECT COUNT(*)::float8 AS queue_depth
+          FROM mail_mail
+          WHERE state = 'outgoing'
+  odoo_attachment.collector.yml: |
+    collector_name: odoo_attachment
+    metrics:
+      - metric_name: odoo_attachment_total
+        type: gauge
+        help: "Binary attachments recorded in the database."
+        values: [attachment_total]
+        query: |
+          SELECT COUNT(*)::float8 AS attachment_total
+          FROM ir_attachment
+          WHERE type = 'binary'
+      - metric_name: odoo_attachment_filestore
+        type: gauge
+        help: "Attachments stored on the filesystem rather than in the row."
+        values: [filestore_count]
+        query: |
+          SELECT COUNT(*)::float8 AS filestore_count
+          FROM ir_attachment
+          WHERE type = 'binary' AND store_fname IS NOT NULL
+      - metric_name: odoo_attachment_database
+        type: gauge
+        help: "Attachments stored inline in the database row."
+        values: [database_count]
+        query: |
+          SELECT COUNT(*)::float8 AS database_count
+          FROM ir_attachment
+          WHERE type = 'binary' AND db_datas IS NOT NULL
+  pg_locks.collector.yml: |
+    collector_name: pg_locks
+    metrics:
+      - metric_name: pg_blocked_query_age_seconds
+        type: gauge
+        help: "Age in seconds of the oldest query blocked on a lock."
+        values: [blocked_seconds]
+        query: |
+          SELECT COALESCE(MAX(EXTRACT(EPOCH FROM (NOW() - query_start))), 0)::float8 AS blocked_seconds
+          FROM pg_stat_activity
+          WHERE wait_event_type = 'Lock' AND state = 'active'
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ $tenant }}-sql-exporter
+  namespace: {{ $tenant }}
+  labels:
+    {{- include "odoo.labels" . | nindent 4 }}
+    app.kubernetes.io/component: sql-exporter
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      {{- include "odoo.selectorLabels" . | nindent 6 }}
+      app.kubernetes.io/component: sql-exporter
+  template:
+    metadata:
+      labels:
+        {{- include "odoo.labels" . | nindent 8 }}
+        app.kubernetes.io/component: sql-exporter
+    spec:
+      automountServiceAccountToken: false
+      securityContext:
+        {{- include "odoo.podSecurityContext" . | nindent 8 }}
+      containers:
+        - name: sql-exporter
+          image: "{{ .Values.observability.sqlExporter.image.repository }}:{{ .Values.observability.sqlExporter.image.tag }}"
+          imagePullPolicy: {{ .Values.observability.sqlExporter.image.pullPolicy }}
+          command: ["/bin/sh", "/etc/sql-exporter/run.sh"]
+          securityContext:
+            {{- include "odoo.containerSecurityContext" . | nindent 12 }}
+          env:
+            - { name: HOME, value: /tmp }
+          ports:
+            - name: metrics
+              containerPort: 9399
+          resources:
+            requests: { cpu: 10m, memory: 32Mi }
+            limits: { cpu: 100m, memory: 128Mi }
+          volumeMounts:
+            - { name: config, mountPath: /etc/sql-exporter, readOnly: true }
+            - { name: db-credentials, mountPath: /etc/db-credentials, readOnly: true }
+            - { name: tmp, mountPath: /tmp }
+      volumes:
+        - name: config
+          configMap:
+            name: {{ $tenant }}-sql-exporter
+        - name: db-credentials
+          secret:
+            secretName: {{ $tenant }}-db-app
+            defaultMode: 0400
+        - name: tmp
+          emptyDir: {}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ $tenant }}-sql-exporter
+  namespace: {{ $tenant }}
+  labels:
+    {{- include "odoo.labels" . | nindent 4 }}
+    app.kubernetes.io/component: sql-exporter
+spec:
+  selector:
+    {{- include "odoo.selectorLabels" . | nindent 4 }}
+    app.kubernetes.io/component: sql-exporter
+  ports:
+    - name: metrics
+      port: 9399
+      targetPort: metrics
+{{- end }}

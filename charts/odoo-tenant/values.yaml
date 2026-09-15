@@ -162,3 +162,11 @@ observability:
   # tenant. Requires the Prometheus Operator CRDs, which the platform installs
   # together with the monitoring stack.
   enabled: true
+  sqlExporter:
+    # Queries Odoo's own tables for the failures that leave it serving while
+    # silently broken: a stalled scheduler, mail that never leaves the queue,
+    # attachments drifting from their rows, a query blocked on a lock.
+    image:
+      repository: burningalchemist/sql_exporter
+      tag: "0.15.0"
+      pullPolicy: IfNotPresent

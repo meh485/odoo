@@ -4,7 +4,16 @@ the rules read, and the rules that make a silent failure loud.
 from conftest import by_kind, helm_template, one
 
 DISABLED = {"observability": {"enabled": False}}
-ALERTS = {"OdooBackupStale", "OdooWalArchivingStalled", "OdooRestoreDrillFailed", "OdooCanaryFailed"}
+ALERTS = {
+    "OdooBackupStale",
+    "OdooWalArchivingStalled",
+    "OdooRestoreDrillFailed",
+    "OdooCanaryFailed",
+    "OdooCronStalled",
+    "OdooMailQueueStalled",
+    "OdooAttachmentDrift",
+    "OdooLockContention",
+}
 
 
 def rules(manifests) -> list[dict]:
@@ -57,3 +66,33 @@ def test_backup_staleness_uses_the_verified_metric(manifests) -> None:
     # The metric name was read off the live instance manager, not assumed.
     exprs = {rule["alert"]: rule["expr"] for group in rules(helm_template()) for rule in group["rules"]}
     assert "cnpg_collector_last_available_backup_timestamp" in exprs["OdooBackupStale"]
+
+
+def test_sql_exporter_is_deployed_and_scraped(manifests) -> None:
+    one(manifests, "Deployment", "sql-exporter")
+    one(manifests, "Service", "sql-exporter")
+    one(manifests, "ServiceMonitor", "sql-exporter")
+
+
+def test_sql_exporter_takes_its_credential_from_a_file(manifests) -> None:
+    pod = one(manifests, "Deployment", "sql-exporter")["spec"]["template"]["spec"]
+    for entry in pod["containers"][0].get("env", []):
+        assert "secretKeyRef" not in str(entry.get("valueFrom", {}))
+    credentials = next(v for v in pod["volumes"] if v["name"] == "db-credentials")
+    assert credentials["secret"]["secretName"] == "acme-db-app"
+    assert credentials["secret"]["defaultMode"] == 0o400
+
+
+def test_sql_exporter_queries_the_odoo_domain_tables(manifests) -> None:
+    data = one(manifests, "ConfigMap", "sql-exporter")["data"]
+    assert "run.sh" in data
+    collectors = [key for key in data if key.endswith(".collector.yml")]
+    assert len(collectors) == 4, collectors
+    joined = " ".join(data.values())
+    for table in ("ir_cron", "mail_mail", "ir_attachment", "pg_stat_activity"):
+        assert table in joined, f"{table} is not queried"
+
+
+def test_sql_exporter_may_reach_postgres(manifests) -> None:
+    names = {policy["metadata"]["name"] for policy in by_kind(manifests, "NetworkPolicy")}
+    assert any("sql-exporter-egress" in name for name in names)

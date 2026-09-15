@@ -123,6 +123,10 @@ spec:
             matchLabels:
               {{- include "odoo.selectorLabels" . | nindent 14 }}
               app.kubernetes.io/component: restore-drill
+        - podSelector:
+            matchLabels:
+              {{- include "odoo.selectorLabels" . | nindent 14 }}
+              app.kubernetes.io/component: sql-exporter
       ports:
         - { protocol: TCP, port: 5432 }
   egress:
@@ -429,4 +433,29 @@ spec:
         {{- range .Values.network.egress.internet.ports }}
         - { protocol: TCP, port: {{ . }} }
         {{- end }}
+{{- end }}
+{{- if .Values.observability.enabled }}
+---
+# The database exporter reads Odoo's tables from Postgres. DNS is allowed
+# globally; nothing else leaves the pod.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ $tenant }}-allow-sql-exporter-egress
+  namespace: {{ $tenant }}
+  labels:
+    {{- include "odoo.labels" . | nindent 4 }}
+spec:
+  podSelector:
+    matchLabels:
+      {{- include "odoo.selectorLabels" . | nindent 6 }}
+      app.kubernetes.io/component: sql-exporter
+  policyTypes: [Egress]
+  egress:
+    - to:
+        - podSelector:
+            matchExpressions:
+              - { key: cnpg.io/cluster, operator: Exists }
+      ports:
+        - { protocol: TCP, port: 5432 }
 {{- end }}
