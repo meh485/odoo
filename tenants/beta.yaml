@@ -15,3 +15,6 @@ backup:
   enabled: true
   destinationPath: "s3://odoo-backups/beta"
   endpointURL: "http://minio.storage.svc.cluster.local:9000"
+  filestore:
+    enabled: true
+    repository: "s3:http://minio.storage.svc.cluster.local:9000/odoo-backups/beta-filestore"

@@ -1,0 +1,76 @@
+{{- $tenant := include "odoo.tenant" . }}
+{{- if and .Values.backup.enabled .Values.backup.filestore.enabled }}
+{{- $repository := required "backup.filestore.repository is required when filestore backup is enabled" .Values.backup.filestore.repository }}
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: {{ $tenant }}-filestore-backup
+  namespace: {{ $tenant }}
+  labels:
+    {{- include "odoo.labels" . | nindent 4 }}
+    app.kubernetes.io/component: filestore-backup
+spec:
+  schedule: {{ .Values.backup.filestore.schedule | quote }}
+  # Two archiving runs at once would fight over the restic repository lock and
+  # over the network; the next run is a minute away.
+  concurrencyPolicy: Forbid
+  startingDeadlineSeconds: 3600
+  successfulJobsHistoryLimit: 3
+  failedJobsHistoryLimit: 3
+  jobTemplate:
+    spec:
+      backoffLimit: 2
+      ttlSecondsAfterFinished: 86400
+      template:
+        metadata:
+          labels:
+            {{- include "odoo.labels" . | nindent 12 }}
+            app.kubernetes.io/component: filestore-backup
+        spec:
+          restartPolicy: OnFailure
+          automountServiceAccountToken: false
+          securityContext:
+            {{- include "odoo.podSecurityContext" . | nindent 12 }}
+          containers:
+            - name: restic
+              image: "{{ .Values.backup.filestore.image.repository }}:{{ .Values.backup.filestore.image.tag }}"
+              imagePullPolicy: {{ .Values.backup.filestore.image.pullPolicy }}
+              securityContext:
+                {{- include "odoo.containerSecurityContext" . | nindent 16 }}
+              env:
+                - { name: TENANT, value: {{ $tenant | quote }} }
+                - { name: RESTIC_REPOSITORY, value: {{ $repository | quote }} }
+                # The password and the object store credential arrive as files;
+                # neither is ever an environment variable.
+                - { name: RESTIC_PASSWORD_FILE, value: /etc/restic/restic_password }
+                - { name: AWS_SHARED_CREDENTIALS_FILE, value: /tmp/.aws/credentials }
+                # The root filesystem is read-only; restic's cache needs a
+                # writable directory.
+                - { name: RESTIC_CACHE_DIR, value: /tmp/restic-cache }
+                - { name: KEEP_DAILY, value: {{ .Values.backup.filestore.keepDaily | quote }} }
+                - { name: KEEP_WEEKLY, value: {{ .Values.backup.filestore.keepWeekly | quote }} }
+                - { name: KEEP_MONTHLY, value: {{ .Values.backup.filestore.keepMonthly | quote }} }
+                - { name: HOME, value: /tmp }
+              resources:
+                requests: { cpu: 50m, memory: 128Mi }
+                limits: { cpu: 500m, memory: 256Mi }
+              volumeMounts:
+                - { name: filestore, mountPath: /var/lib/odoo, readOnly: true }
+                - { name: object-store-credentials, mountPath: /etc/aws-credentials, readOnly: true }
+                - { name: restic-password, mountPath: /etc/restic, readOnly: true }
+                - { name: tmp, mountPath: /tmp }
+          volumes:
+            - name: filestore
+              persistentVolumeClaim:
+                claimName: {{ $tenant }}-filestore
+            - name: object-store-credentials
+              secret:
+                secretName: {{ $tenant }}-backup-credentials
+                defaultMode: 0400
+            - name: restic-password
+              secret:
+                secretName: {{ $tenant }}-restic
+                defaultMode: 0400
+            - name: tmp
+              emptyDir: {}
+{{- end }}

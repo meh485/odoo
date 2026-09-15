@@ -85,6 +85,22 @@ backup:
   # Weekly, at 04:00, clear of the 02:00 backup window. A restore running while
   # the base backup it depends on is being written would prove nothing.
   drillSchedule: "0 4 * * 0"
+  filestore:
+    # Odoo keeps attachments on the filesystem, not in the database. Capturing
+    # only the database restores a tenant whose invoices and images are all
+    # missing, so the filestore is backed up separately, to its own repository.
+    enabled: false
+    # 02:30, after the 02:00 database backup has started.
+    schedule: "30 2 * * *"
+    # e.g. s3:http://minio.storage.svc.cluster.local:9000/odoo-backups/acme-filestore
+    repository: ""
+    keepDaily: 7
+    keepWeekly: 4
+    keepMonthly: 6
+    image:
+      repository: odoo-filestore-backup
+      tag: "0.1.0"
+      pullPolicy: IfNotPresent
 
 gateway:
   # The shared Gateway the platform team owns. Tenants attach to it.

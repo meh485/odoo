@@ -19,6 +19,11 @@ backup:
   enabled: true
   destinationPath: "s3://odoo-backups/acme"
   endpointURL: "http://minio.storage.svc.cluster.local:9000"
+  filestore:
+    # Attachments live on the filesystem; without this a restored tenant has
+    # every invoice and image missing.
+    enabled: true
+    repository: "s3:http://minio.storage.svc.cluster.local:9000/odoo-backups/acme-filestore"
 
 network:
   egress:

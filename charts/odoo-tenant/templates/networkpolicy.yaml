@@ -257,6 +257,31 @@ spec:
               kubernetes.io/metadata.name: {{ .Values.network.pushgatewayNamespace }}
       ports:
         - { protocol: TCP, port: {{ .Values.network.pushgatewayPort }} }
+{{- if .Values.backup.filestore.enabled }}
+---
+# The filestore backup writes to the same object store the database uses, from
+# its own pod. DNS is allowed globally; nothing else leaves the pod.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ $tenant }}-allow-filestore-backup-egress
+  namespace: {{ $tenant }}
+  labels:
+    {{- include "odoo.labels" . | nindent 4 }}
+spec:
+  podSelector:
+    matchLabels:
+      {{- include "odoo.selectorLabels" . | nindent 6 }}
+      app.kubernetes.io/component: filestore-backup
+  policyTypes: [Egress]
+  egress:
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: {{ .Values.network.backupNamespace }}
+      ports:
+        - { protocol: TCP, port: {{ .Values.network.backupPort }} }
+{{- end }}
 {{- end }}
 {{- if .Values.canary.enabled }}
 ---
