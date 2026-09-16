@@ -19,3 +19,29 @@ spec:
       path: /metrics
       interval: 30s
       honorLabels: true
+---
+# The Envoy data plane, which is where request rate, latency and response codes
+# for everything arriving at the gateway come from. Nothing about the
+# application tells you how much traffic it is serving, so without this the
+# platform dashboard would have no traffic panel at all.
+#
+# A PodMonitor rather than a ServiceMonitor: the Envoy Service exposes 80 and
+# 443 for traffic, not the metrics port.
+apiVersion: monitoring.coreos.com/v1
+kind: PodMonitor
+metadata:
+  name: envoy-gateway-data-plane
+  namespace: monitoring
+  labels:
+    app.kubernetes.io/name: envoy
+spec:
+  namespaceSelector:
+    matchNames: [envoy-gateway-system]
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: envoy
+  podMetricsEndpoints:
+    # Envoy's Prometheus output is not at /metrics.
+    - port: metrics
+      path: /stats/prometheus
+      interval: 15s

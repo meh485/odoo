@@ -52,6 +52,14 @@ spec:
               kubernetes.io/metadata.name: kube-system
       ports:
         - { protocol: TCP, port: 9153 }
+    # The Envoy data plane, for gateway request rate, latency and response
+    # codes. It is scraped through the PodMonitor in monitors.yaml.
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: envoy-gateway-system
+      ports:
+        - { protocol: TCP, port: 19001 }
 ---
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy

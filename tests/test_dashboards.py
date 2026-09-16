@@ -10,10 +10,11 @@ from pathlib import Path
 import yaml
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
-DASHBOARD_FILES = [
-    REPO_ROOT / "platform" / "monitoring" / "dashboards.yaml",
-    REPO_ROOT / "platform" / "monitoring" / "dashboards-ops.yaml",
-]
+# Globbed rather than listed: a new dashboard file should be covered by these
+# checks the moment it is added, not when someone remembers to add it here.
+DASHBOARD_FILES = sorted(
+    (REPO_ROOT / "platform" / "monitoring").glob("dashboards*.yaml")
+)
 
 
 def dashboards():
