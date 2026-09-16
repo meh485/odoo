@@ -2,12 +2,9 @@
 # adding a customer is a commit, removing one is a deletion, and drift is
 # reconciled continuously.
 #
-# acme is excluded rather than absent: it was installed by `helm upgrade` before
-# ArgoCD existed on this cluster, and two owners for one set of objects is
-# exactly the conflict this repository already hit once, with the CloudNativePG
-# PodMonitors. Adopting it is a deliberate act -- drop the exclude and stop
-# using `make tenant` for that tenant -- and until then it is a limit recorded
-# in DESIGN.md.
+# acme is excluded rather than absent: it predates ArgoCD on this cluster, so it
+# is the one tenant still owned by a Helm release. Adopting it is a deliberate
+# act, and until then it is a limit recorded in DESIGN.md.
 apiVersion: argoproj.io/v1alpha1
 kind: ApplicationSet
 metadata:
@@ -45,6 +42,13 @@ spec:
             # values for why the two cannot be the same object.
             - name: argocd.enabled
               value: "true"
+            # Credentials are declared as ExternalSecrets and materialised by
+            # the operator, so no Secret has to exist before the first sync.
+            # Local store; production points at the Vault-backed one.
+            - name: credentials.externalSecrets.enabled
+              value: "true"
+            - name: credentials.externalSecrets.store
+              value: tenant-credentials
       destination:
         server: https://kubernetes.default.svc
         namespace: "{{.tenant.name}}"

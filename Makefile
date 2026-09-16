@@ -21,22 +21,10 @@ platform: ## Install operators and platform-wide resources
 # No --wait on the upgrade: Helm can deadlock waiting on the post-install
 # hooks on a local cluster and leave the release stuck in pending-upgrade.
 # Watch the release with `helm status` and `kubectl get pods` instead.
-.PHONY: tenant
-tenant: ## Install or upgrade a tenant: make tenant TENANT=acme
-	@test -n "$(TENANT)" || { echo "TENANT is required, e.g. make tenant TENANT=acme"; exit 1; }
-	@test -f tenants/$(TENANT).yaml || { echo "no tenants/$(TENANT).yaml to install"; exit 1; }
-	@kubectl create namespace "$(TENANT)" --dry-run=client -o yaml | kubectl apply -f - >/dev/null
-	@scripts/seed-backup-credentials.sh "$(TENANT)"
-	@scripts/seed-tenant-credentials.sh "$(TENANT)"
-	@helm upgrade --install "$(TENANT)" $(CHART) \
-		--namespace "$(TENANT)" \
-		--values tenants/$(TENANT).yaml
-
 .PHONY: seed
-seed: ## Seed a tenant's out-of-band credentials for the ArgoCD path: make seed TENANT=acme
+seed: ## Seed a tenant's credentials into the store External Secrets reads: make seed TENANT=acme
 	@test -n "$(TENANT)" || { echo "TENANT is required, e.g. make seed TENANT=acme"; exit 1; }
 	@scripts/seed-tenant-credentials.sh "$(TENANT)"
-	@scripts/seed-backup-credentials.sh "$(TENANT)"
 
 .PHONY: lint
 lint: ## Lint the chart

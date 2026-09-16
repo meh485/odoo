@@ -8,6 +8,7 @@ ENVOY_GATEWAY_VERSION="v1.9.1"
 ENVOY_GATEWAY_CHART="oci://docker.io/envoyproxy/gateway-helm"
 KUBE_PROMETHEUS_VERSION="91.4.0"
 ARGOCD_VERSION="v3.5.3"
+EXTERNAL_SECRETS_VERSION="2.10.0"
 
 # CloudNativePG publishes an install manifest rather than a Helm chart. The
 # image tag it deploys is what the cluster runs today.
@@ -42,13 +43,25 @@ kubectl create namespace argocd --dry-run=client -o yaml | kubectl apply -f - >/
 kubectl apply --server-side -n argocd \
   -f "https://raw.githubusercontent.com/argoproj/argo-cd/${ARGOCD_VERSION}/manifests/install.yaml"
 
+# External Secrets, which materialises each tenant's credentials from the store.
+# Installed before the platform manifests are applied, because the
+# ClusterSecretStore in platform/credentials is one of its custom resources and
+# `set -e` would abort the install without the CRDs.
+helm repo add external-secrets https://charts.external-secrets.io >/dev/null
+helm repo update >/dev/null
+helm upgrade --install external-secrets external-secrets/external-secrets \
+  --version "${EXTERNAL_SECRETS_VERSION}" \
+  --namespace external-secrets --create-namespace \
+  --set installCRDs=true
+
 # Platform manifests are applied, not templated: the gateway, the object store
 # and the metrics sink are platform-owned and shared by every tenant.
 kubectl apply -f platform/
 
 # The object store needs a root credential that is deliberately not committed,
 # mirroring how the gateway's TLS secret is created out of band. It is created
-# once; tenant backup credentials are seeded from it by `make tenant`.
+# once; tenant credentials are seeded into the credentials namespace by
+# `make seed`, and External Secrets materialises them into each tenant.
 if ! kubectl get secret minio-credentials -n storage >/dev/null 2>&1; then
   kubectl create secret generic minio-credentials -n storage \
     --from-literal=ACCESS_KEY_ID="$(openssl rand -hex 12)" \

@@ -18,37 +18,41 @@ tests.
 
 ```bash
 make cluster              # three-node kind cluster named odoo
-make platform             # operators, gateway, monitoring, MinIO, ArgoCD
-make seed TENANT=acme     # the credentials the chart only references
-make tenant TENANT=acme   # provision acme with Helm
+make platform             # operators, gateway, monitoring, MinIO, ArgoCD, External Secrets
 ```
 
 ## Provisioning a tenant
 
-A tenant is a values file in `tenants/`. There are two ways to apply it, and
-they render the same chart.
-
-**The GitOps path (ArgoCD).** `make platform` installs ArgoCD, and the committed
-`ApplicationSet` creates one `Application` per file in `tenants/`. Adding a
+A tenant is a values file in `tenants/`. `make platform` installs ArgoCD, whose
+committed `ApplicationSet` creates one `Application` per file there, so adding a
 customer is a commit:
 
 ```bash
 cp tenants/beta.yaml tenants/newco.yaml   # edit name, hostname, backup paths
-make seed TENANT=newco                    # namespace + the four Secrets
+make seed TENANT=newco                    # write its credentials to the store
 git add tenants/newco.yaml && git commit -m "tenant: newco" && git push
 kubectl -n argocd get applications -w     # watch it sync
 ```
 
-Seed first: the chart only *references* the credentials (generating them in a
-template would change them on every render, and ArgoCD would never report
-Synced), and the schema-init job mounts them. `make seed` is idempotent.
+Credentials are **declared, not generated**: the chart renders an
+`ExternalSecret` per credential, and External Secrets materialises the Secret
+into the tenant namespace from the store. That is why seeding happens before the
+commit, and why no tenant namespace has to exist yet — the store needs the
+values, and ArgoCD creates the namespace along with everything else.
 
-ArgoCD is reachable with
-`kubectl -n argocd port-forward svc/argocd-server 8080:443`, logging in as
-`admin` with the password from the `argocd-initial-admin-secret`.
+Locally the store is a Kubernetes namespace (`odoo-credentials`) that `make seed`
+fills, standing in for Vault. In production the `ClusterSecretStore` points at
+Vault and `make seed` is not used at all; the chart and the tenant's values file
+are unchanged either way. `make seed` is idempotent: it never overwrites a
+credential that exists, so it will not rotate anything.
 
-**The Helm path (local iteration).** `make tenant TENANT=acme` creates the
-namespace, seeds the same credentials and runs `helm upgrade --install`.
+ArgoCD is at `kubectl -n argocd port-forward svc/argocd-server 8080:443`, logged
+in as `admin` with the password from the `argocd-initial-admin-secret`.
+
+Helm is still used, but only to **render** the chart: ArgoCD renders it that way,
+and the tests and CI use `helm template` and `helm lint`. Nothing installs with
+Helm — one provisioner means one owner for every object.
+
 
 
 ## Reaching the running stack
@@ -103,18 +107,18 @@ can reach the monitoring namespace or another tenant's database.
 |---|---|
 | `charts/odoo-tenant/` | The one chart: web, cron, CloudNativePG cluster, pooler, canary, sql_exporter, backups, restore drill, network policies, alerts |
 | `tenants/` | One values file per customer; credentials live in Secrets, not here |
-| `platform/` | Cluster-wide: Gateway, monitoring stack and its policies, MinIO, ArgoCD `ApplicationSet` |
+| `platform/` | Cluster-wide: Gateway, monitoring stack and its policies, MinIO, ArgoCD, the External Secrets store |
 | `cluster/kind.yaml` | The development cluster definition |
 | `images/canary/` | Synthetic Odoo probe: JSON-RPC login plus a record read |
-| `scripts/` | Platform install, backup credential seeding, filestore backup, restore drill |
+| `scripts/` | Platform install, credential seeding, filestore backup, restore drill |
 | `tests/` | Chart unit tests, shell tests, and `tests/integration/` for the live cluster |
 | `DESIGN.md` | The reasoning, the trade-offs, and the limits |
 
 ## Operations
 
-**Tenants.** Add `tenants/<name>.yaml`, then `make tenant TENANT=<name>`. The
-chart creates the namespace contents; backup credentials are seeded from the
-object store's own credential by `scripts/seed-backup-credentials.sh`.
+**Tenants.** Add `tenants/<name>.yaml`, run `make seed TENANT=<name>` to put its
+credentials in the store, and push. ArgoCD creates the namespace and everything
+in it; External Secrets materialises the four credentials into that namespace.
 
 **Backups.** CloudNativePG archives WAL continuously and takes scheduled base
 backups to MinIO; a restic `CronJob` snapshots the filestore. Both are

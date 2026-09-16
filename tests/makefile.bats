@@ -3,10 +3,10 @@ load test_helper
 
 setup() { setup_common; }
 
-@test "make help lists the tenant target" {
+@test "make help lists the seed target" {
   run make -C "$REPO_ROOT" help
   [ "$status" -eq 0 ]
-  [[ "$output" == *"tenant"* ]]
+  [[ "$output" == *"seed"* ]]
 }
 
 @test "require_tenant rejects an invalid tenant name" {

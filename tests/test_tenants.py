@@ -1,5 +1,5 @@
 """The tenants/ directory is the source of truth for provisioning: one file per
-customer, consumed by `make tenant` and by the ArgoCD ApplicationSet generator.
+customer, consumed by the ArgoCD ApplicationSet generator.
 """
 from pathlib import Path
 

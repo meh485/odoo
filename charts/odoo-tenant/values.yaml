@@ -1,6 +1,19 @@
 # Every value a tenant may override. A tenant's values file in tenants/
 # should need only a handful of these.
 
+credentials:
+  externalSecrets:
+    # Declare ExternalSecrets for the four credentials this chart references,
+    # so the operator materialises them instead of expecting them to exist.
+    # This is the production shape: the store is Vault there and a platform
+    # namespace here, and nothing else about the tenant changes.
+    enabled: false
+    # The ClusterSecretStore to read from. Required when enabled.
+    store: ""
+    # The key the tenant's credentials live under in the store. Defaults to the
+    # tenant name, which is what the seeding script writes.
+    remoteKey: ""
+
 tenant:
   # Becomes the namespace name and the Odoo database name.
   name: ""

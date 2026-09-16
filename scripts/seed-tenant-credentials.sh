@@ -1,54 +1,56 @@
 #!/usr/bin/env bash
-# Create a tenant's generated credentials if they do not already exist.
+# Seed a tenant's credentials into the store that External Secrets reads from.
 #
-# The chart only references these Secrets; it never creates them. A password
-# generated during a helm render changes on every render, so Argo CD would see
-# permanent drift, and syncing it would rotate whatever consumes the value --
-# for restic, that means making every existing snapshot unreadable.
+# Three are generated and two are copied from the object store's own credential,
+# so there is one source of truth for each. This is the stand-in for Vault: with
+# a real backend these values are already in it and this script is not used.
 #
-# The backup credential is deliberately not here: seed-backup-credentials.sh
-# copies it from the object store's own credential, so there is one source of
-# truth for it. In production External Secrets Operator writes all of these
-# from Vault, and neither the chart nor a tenant's values file changes.
+# It writes one Secret per tenant into the credentials namespace and touches no
+# tenant namespace at all. The tenant namespace does not exist when this runs --
+# under ArgoCD the chart creates it, along with the ExternalSecrets that
+# materialise these values into it.
 set -euo pipefail
 
 TENANT="${1:?usage: seed-tenant-credentials.sh TENANT}"
-NAMESPACE="${TENANT}"
+NAMESPACE="${CREDENTIALS_NAMESPACE:-odoo-credentials}"
+SECRET="${TENANT}"
 
-# Create the namespace rather than skipping: with ArgoCD the credentials have to
-# exist before the first sync reaches the job that mounts them, and seeding
-# before pushing the tenant file is the sane order. ArgoCD then adopts this
-# namespace and applies the chart's Pod Security labels to it.
 if ! kubectl get namespace "$NAMESPACE" >/dev/null 2>&1; then
-  kubectl create namespace "$NAMESPACE" >/dev/null
-  echo "created namespace ${NAMESPACE}"
+  echo "namespace ${NAMESPACE} does not exist yet; is the platform installed?"
+  exit 1
 fi
 
-# seed SECRET KEY [SUPPLIED]
+if kubectl get secret "$SECRET" -n "$NAMESPACE" >/dev/null 2>&1; then
+  echo "${NAMESPACE}/${SECRET} already exists; leaving it untouched"
+  exit 0
+fi
+
+# A tenant whose object store credential does not exist yet has nothing to copy,
+# and this must not quietly produce a half-populated Secret.
+if ! kubectl get secret minio-credentials -n storage >/dev/null 2>&1; then
+  echo "no storage/minio-credentials Secret; cannot seed the object store keys"
+  exit 1
+fi
+
+# ADMIN_PASSWD and friends let a caller supply an existing value instead of
+# generating one, which is how a tenant keeps its credentials when it moves to
+# this scheme. To rotate one, delete the Secret and seed it again.
 #
-# SUPPLIED lets a caller pass an existing value instead of generating one,
-# which is how a tenant keeps its credentials when it moves to this scheme.
-seed() {
-  local secret="$1" key="$2" supplied="${3:-}"
+# openssl, not `tr /dev/urandom | head`: under `set -o pipefail` the head exits
+# first and kills tr with SIGPIPE, so the pipeline reports 141 and this script
+# aborts without creating anything.
+admin="${ADMIN_PASSWD:-$(openssl rand -hex 24)}"
+canary="${CANARY_PASSWORD:-$(openssl rand -hex 24)}"
+restic="${RESTIC_PASSWORD:-$(openssl rand -hex 24)}"
+access_key_id="$(kubectl get secret minio-credentials -n storage \
+  -o go-template='{{.data.ACCESS_KEY_ID | base64decode}}')"
+secret_access_key="$(kubectl get secret minio-credentials -n storage \
+  -o go-template='{{.data.ACCESS_SECRET_KEY | base64decode}}')"
 
-  if kubectl get secret "$secret" -n "$NAMESPACE" >/dev/null 2>&1; then
-    echo "${secret} already exists; leaving it untouched"
-    return 0
-  fi
-
-  local value="$supplied"
-  if [ -z "$value" ]; then
-    # openssl, not `tr /dev/urandom | head`: under `set -o pipefail` the head
-    # exits first and kills tr with SIGPIPE, so the pipeline reports 141 and
-    # this script aborts without creating anything.
-    value="$(openssl rand -hex 24)"
-  fi
-
-  kubectl create secret generic "$secret" -n "$NAMESPACE" \
-    --from-literal="$key=$value" >/dev/null
-  echo "created ${secret}"
-}
-
-seed "${TENANT}-odoo-admin" admin_passwd "${ADMIN_PASSWD:-}"
-seed "${TENANT}-canary" canary_password "${CANARY_PASSWORD:-}"
-seed "${TENANT}-restic" restic_password "${RESTIC_PASSWORD:-}"
+kubectl create secret generic "$SECRET" -n "$NAMESPACE" \
+  --from-literal=admin_passwd="$admin" \
+  --from-literal=canary_password="$canary" \
+  --from-literal=restic_password="$restic" \
+  --from-literal=ACCESS_KEY_ID="$access_key_id" \
+  --from-literal=ACCESS_SECRET_KEY="$secret_access_key" >/dev/null
+echo "seeded ${NAMESPACE}/${SECRET} with the five credential keys"

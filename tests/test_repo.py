@@ -30,5 +30,5 @@ def test_the_kind_cluster_config_is_committed():
 
 def test_the_readme_documents_every_make_target_it_needs():
     text = README.read_text()
-    for target in ("make cluster", "make platform", "make tenant", "make test", "make e2e"):
+    for target in ("make cluster", "make platform", "make seed", "make test", "make e2e"):
         assert target in text, f"README does not mention {target}"
