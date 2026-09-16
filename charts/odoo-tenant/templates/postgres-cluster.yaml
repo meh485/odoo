@@ -46,7 +46,12 @@ spec:
     {{- toYaml .Values.postgres.resources | nindent 4 }}
 
   monitoring:
-    enablePodMonitor: true
+    # The chart renders its own PodMonitor for this cluster, so the operator
+    # must not render one too: both would carry the same name and fight over
+    # .spec.podMetricsEndpoints, which fails the upgrade with a server-side
+    # apply conflict. The monitor lives in the chart so it is visible in git
+    # and covered by a test.
+    enablePodMonitor: false
 
   {{- if .Values.backup.enabled }}
   backup:

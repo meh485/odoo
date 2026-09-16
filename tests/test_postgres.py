@@ -65,5 +65,11 @@ def test_no_backup_stanza_when_disabled(manifests):
     assert "backup" not in one(manifests, "Cluster")["spec"]
 
 
-def test_monitoring_is_enabled(manifests):
-    assert one(manifests, "Cluster")["spec"]["monitoring"]["enablePodMonitor"] is True
+def test_the_operator_does_not_also_render_the_pod_monitor(manifests):
+    # The chart renders {tenant}-db and {tenant}-pooler PodMonitors itself.
+    # With the operator's own monitor enabled as well, both objects share a
+    # name and a server-side apply conflict fails every helm upgrade.
+    cluster = one(manifests, "Cluster")
+    assert cluster["spec"]["monitoring"]["enablePodMonitor"] is False
+    pooler = one(manifests, "Pooler")
+    assert pooler["spec"]["monitoring"]["enablePodMonitor"] is False

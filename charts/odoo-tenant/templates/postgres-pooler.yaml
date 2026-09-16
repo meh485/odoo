@@ -20,4 +20,6 @@ spec:
       max_client_conn: {{ .Values.postgres.pooler.maxClientConn | quote }}
       default_pool_size: {{ .Values.postgres.pooler.defaultPoolSize | quote }}
   monitoring:
-    enablePodMonitor: true
+    # See the Cluster: the chart owns this PodMonitor, and enabling the
+    # operator's as well makes two managers fight over the same object.
+    enablePodMonitor: false
