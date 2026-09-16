@@ -34,6 +34,21 @@ def test_every_scrape_target_is_up(query, tenants):
         )
 
 
+def test_no_scrape_target_anywhere_is_down(query):
+    """Nothing the monitoring stack scrapes should be permanently red.
+
+    A dashboard half full of down targets teaches everyone to ignore
+    up == 0, which is the opposite of what this stack exists for. This is
+    the assertion that caught twelve unreachable cluster-component targets
+    the policies were silently blocking.
+    """
+    down = query("up == 0")
+    assert not down, (
+        "down scrape targets: "
+        f"{[(r['metric'].get('job'), r['metric'].get('instance')) for r in down]}"
+    )
+
+
 def test_canary_login_succeeds(query, tenants):
     for tenant in tenants:
         value = _scalar(query, f'odoo_canary_success{{tenant="{tenant}"}}')

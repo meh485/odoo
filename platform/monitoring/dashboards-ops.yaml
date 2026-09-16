@@ -79,12 +79,27 @@ data:
       "schemaVersion": 39,
       "refresh": "30s",
       "time": {"from": "now-6h", "to": "now"},
+      "templating": {
+        "list": [
+          {
+            "name": "tenant",
+            "label": "Tenant",
+            "type": "query",
+            "datasource": {"type": "prometheus", "uid": "prometheus"},
+            "query": {"query": "label_values(up{job=~\".+-canary\"}, namespace)", "refId": "A"},
+            "refresh": 1,
+            "includeAll": true,
+            "multi": true,
+            "current": {"text": "All", "value": "$__all"}
+          }
+        ]
+      },
       "panels": [
         {
-          "id": 1, "type": "stat", "title": "Scraped targets up (acme)",
+          "id": 1, "type": "stat", "title": "Scraped targets up",
           "datasource": {"type": "prometheus", "uid": "prometheus"},
           "gridPos": {"h": 6, "w": 6, "x": 0, "y": 0},
-          "targets": [{"refId": "A", "expr": "count(up{namespace=\"acme\"} == 1)"}],
+          "targets": [{"refId": "A", "expr": "count by (namespace) (up{namespace=~\"$tenant\"})", "legendFormat": "{{namespace}}"}],
           "fieldConfig": {"defaults": {"mappings": [], "thresholds": {"mode": "absolute", "steps": [{"color": "red", "value": null}, {"color": "green", "value": 1}]}}, "overrides": []}
         },
         {
@@ -132,7 +147,7 @@ data:
           "id": 7, "type": "timeseries", "title": "Container restarts (per 5m)",
           "datasource": {"type": "prometheus", "uid": "prometheus"},
           "gridPos": {"h": 8, "w": 12, "x": 12, "y": 14},
-          "targets": [{"refId": "A", "expr": "sum(rate(kube_pod_container_status_restarts_total{namespace=\"acme\"}[5m])) by (pod)", "legendFormat": "{{pod}}"}],
+          "targets": [{"refId": "A", "expr": "sum by (pod) (rate(kube_pod_container_status_restarts_total{namespace=~\"$tenant\"}[5m]))", "legendFormat": "{{pod}}"}],
           "fieldConfig": {"defaults": {"custom": {"drawStyle": "line", "fillOpacity": 10, "lineWidth": 1, "showPoints": "never"}}, "overrides": []}
         },
         {
