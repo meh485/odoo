@@ -32,6 +32,20 @@ odoo:
     size: 10Gi
     storageClass: ""
   logLevel: info
+  adminPassword:
+    # A Secret that already holds the admin password under the key
+    # admin_passwd. The chart only references it; it never creates it.
+    #
+    # A password generated during a render makes the manifests depend on
+    # cluster state. Argo CD cannot run Helm's lookup, so it would generate a
+    # new password on every sync: the value would change, and the application
+    # would never report Synced.
+    #
+    # Empty means the default name, {tenant}-odoo-admin. Locally
+    # scripts/seed-admin-credentials.sh creates it once; in production
+    # External Secrets Operator fills the same Secret from Vault, and neither
+    # this value nor any template changes.
+    existingSecret: ""
 
 postgres:
   instances: 2

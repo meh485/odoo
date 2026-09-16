@@ -1,5 +1,5 @@
 import pytest
-from conftest import one
+from conftest import by_kind, helm_template, one
 
 
 def test_web_and_cron_are_separate_deployments(manifests):
@@ -110,9 +110,36 @@ def test_secrets_are_not_mounted_under_run_secrets(manifests, suffix):
         )
 
 
-def test_admin_secret_is_rendered(manifests):
-    secret = one(manifests, "Secret", "odoo-admin")
-    assert secret["data"]["admin_passwd"]
+def test_the_chart_does_not_generate_the_admin_secret(manifests):
+    # A render-time generated password makes the manifests depend on cluster
+    # state. Argo CD renders without Helm's lookup, so the value would be
+    # regenerated on every sync, the app would never leave OutOfSync, and the
+    # live password would change each time. The Secret is created out of band
+    # (a seed script locally, External Secrets in production) and only
+    # referenced here.
+    rendered = {
+        secret["metadata"]["name"] for secret in by_kind(manifests, "Secret")
+    }
+    assert not {name for name in rendered if name.endswith("-odoo-admin")}, (
+        f"the chart renders the admin Secret: {sorted(rendered)}"
+    )
+
+
+def test_the_credentials_volume_references_the_admin_secret(manifests):
+    assert "acme-odoo-admin" in _credential_secret_names(manifests)
+
+
+def test_the_admin_secret_name_can_be_overridden():
+    manifests = helm_template(
+        {"odoo": {"adminPassword": {"existingSecret": "vault-managed-admin"}}}
+    )
+    assert "vault-managed-admin" in _credential_secret_names(manifests)
+
+
+def _credential_secret_names(manifests) -> set[str]:
+    pod = one(manifests, "Deployment", "-web")["spec"]["template"]["spec"]
+    volume = next(v for v in pod["volumes"] if v["name"] == "db-credentials")
+    return {source["secret"]["name"] for source in volume["projected"]["sources"]}
 
 
 def test_odoo_points_at_the_pooler_service_that_actually_exists(manifests):

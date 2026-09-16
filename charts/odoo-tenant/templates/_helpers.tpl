@@ -37,6 +37,13 @@ capabilities:
   drop: [ALL]
 {{- end -}}
 
+{{/* The admin password's Secret, which the chart never creates. Rendering a
+     password here would regenerate it on every render: Argo CD would see
+     permanent drift and sync a rotated credential. */}}
+{{- define "odoo.adminSecretName" -}}
+{{- .Values.odoo.adminPassword.existingSecret | default (printf "%s-odoo-admin" (include "odoo.tenant" .)) -}}
+{{- end -}}
+
 {{/* Credentials projected into one directory. Two Secrets cannot mount at the
      same path, and no password may reach an environment variable. */}}
 {{- define "odoo.credentialVolume" -}}
@@ -49,7 +56,7 @@ capabilities:
           items:
             - { key: password, path: db_password }
       - secret:
-          name: {{ include "odoo.tenant" . }}-odoo-admin
+          name: {{ include "odoo.adminSecretName" . }}
           items:
             - { key: admin_passwd, path: admin_passwd }
       - secret:
