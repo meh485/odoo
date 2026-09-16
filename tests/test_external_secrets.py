@@ -77,6 +77,14 @@ def test_the_store_reads_the_shared_credentials_namespace():
     assert provider["kubernetes"]["auth"]["serviceAccount"]["name"] == "acme-credential-reader"
 
 
+def test_the_store_omits_the_ca_namespace():
+    # External Secrets rejects a namespaced store that sets it -- "CAProvider
+    # .namespace must be empty with SecretStore" -- and reads the CA from the
+    # store's own namespace instead. It looks like an omission, so it is pinned.
+    provider = one(helm_template(BACKUP), "SecretStore", "acme-credentials")["spec"]["provider"]
+    assert "namespace" not in provider["kubernetes"]["server"]["caProvider"]
+
+
 def test_the_reader_can_reach_only_this_tenants_secret():
     role = reader_role(helm_template(BACKUP))
     assert role["metadata"]["namespace"] == "odoo-credentials"
