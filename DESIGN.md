@@ -85,11 +85,11 @@ belongs to the platform team, each tenant's `HTTPRoute` to the tenant.
 
 **Helm chart plus ArgoCD ApplicationSet.** One chart, one values file per tenant
 in git, one `Application` per tenant from a git files generator, so provisioning
-is a commit and drift is continuously reconciled. ArgoCD runs on the demo
-cluster too, installed by `scripts/platform-install.sh`, and provisions every
-tenant except `acme` — which predates it here and is still installed by Helm,
-because two owners for one set of objects is the conflict this repository has
-already been bitten by once.
+is a commit and drift is continuously reconciled. ArgoCD runs on the demo cluster
+too, installed by `scripts/platform-install.sh`, and it is the only provisioner:
+every tenant is managed here, including the one that predates it, which was
+adopted rather than rebuilt and whose Helm release records were then removed so
+that no object has two owners.
 
 ### Bootstrapping a tenant in order
 
@@ -407,14 +407,14 @@ Everything below is a real gap, not a hypothetical:
   the same hour.
 - **No multi-region or active-active.** Single region with tested recovery, as
   the brief allows.
-- **`acme` is not ArgoCD-managed yet.** It predates ArgoCD on this cluster and
-  is still a Helm release. Adopting it is a deliberate act, because two owners
-  for one set of objects is the conflict this repository has already been bitten
-  by twice.
-- **The integration suite does not see ArgoCD-provisioned tenants.** Its fixture
-  intersects `tenants/*.yaml` with Helm releases, so a tenant created by ArgoCD
-  is skipped rather than asserted. That is why the suite passed while `beta` was
-  broken, and it has to be fixed before it can be trusted as a gate.
+- **Adopting a tenant into the operator breaks its WAL archiving until the
+  database restarts.** The operator rewrites the credential Secret and
+  CloudNativePG's instance manager has it cached, so archiving fails with a
+  cache miss until the pod restarts. After that restart the destination holds
+  WAL files with no base backup, which barman rejects until
+  `cnpg.io/skipEmptyWalArchiveCheck` is set on that cluster. Both were hit while
+  adopting tenants here, and neither is visible until a backup is attempted;
+  a tenant provisioned from scratch never sees either.
 - **ArgoCD reads this repository with a deploy key** generated for the demo,
   read-only and revocable in one command. A real installation uses whatever
   credential the organisation already has.

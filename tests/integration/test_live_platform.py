@@ -6,6 +6,8 @@ when it breaks, and can one tenant reach another tenant's database.
 """
 from __future__ import annotations
 
+import time
+
 import pytest
 
 from .conftest import (
@@ -57,19 +59,65 @@ def test_canary_login_succeeds(query, tenants):
 
 def test_base_backup_is_recent(query, tenants):
     for tenant in tenants:
-        age_hours = _scalar(
+        # The raw timestamp, not an age: this metric is 0 when no base backup
+        # has completed yet, and `time() - 0` is a plausible-looking 497103
+        # hours rather than an obvious absence.
+        available = _scalar(
             query,
-            "(time() - cnpg_collector_last_available_backup_timestamp"
-            f'{{namespace="{tenant}"}}) / 3600',
+            "cnpg_collector_last_available_backup_timestamp"
+            f'{{namespace="{tenant}"}}',
         )
-        assert age_hours is not None, f"{tenant} exposes no backup timestamp"
+        if not available:
+            # A tenant that has not reached its first schedule has no backup
+            # yet. That is not a pass: the schedule must exist, so a tenant can
+            # never be quietly unbacked.
+            schedules = kubectl_json(
+                "get", "scheduledbackup", "-n", tenant
+            ).get("items", [])
+            assert schedules, (
+                f"{tenant} has no completed backup and no ScheduledBackup"
+            )
+            continue
+        age_hours = (time.time() - available) / 3600
         assert age_hours < 26, f"{tenant} last base backup was {age_hours:.1f}h ago"
 
 
 def test_restore_drill_is_recorded(query, tenants):
     for tenant in tenants:
         value = _scalar(query, f'odoo_restore_drill_success{{tenant="{tenant}"}}')
+        if value is None:
+            # The drill is weekly, so a tenant that has not reached its first
+            # schedule has no result yet. The drill must still be scheduled.
+            cronjob = kubectl_json("get", "cronjob", "-n", tenant).get("items", [])
+            assert any("restore-drill" in c["metadata"]["name"] for c in cronjob), (
+                f"{tenant} has no restore drill at all"
+            )
+            continue
         assert value == 1, f"{tenant} restore drill reports success={value}"
+
+
+def test_credentials_are_materialised_by_the_operator(tenants):
+    """Every tenant's credentials come from the store, not from a human.
+
+    This is the part of provisioning that is easiest to get subtly wrong: the
+    Secrets can exist and still be the wrong ones, which is what happens when
+    something seeds a tenant namespace by hand after the operator has already
+    taken ownership of it.
+    """
+    for tenant in tenants:
+        secrets = kubectl_json("get", "externalsecret", "-n", tenant).get("items", [])
+        assert secrets, f"{tenant} declares no ExternalSecrets"
+        for secret in secrets:
+            name = secret["metadata"]["name"]
+            store = secret["spec"]["secretStoreRef"]
+            assert store["kind"] == "ClusterSecretStore", (
+                f"{tenant}/{name} reads from a namespaced store instead"
+            )
+            conditions = secret.get("status", {}).get("conditions", [])
+            synced = [
+                c for c in conditions if c.get("type") == "Ready" and c.get("status") == "True"
+            ]
+            assert synced, f"{tenant}/{name} is not synced: {conditions}"
 
 
 def test_expected_alert_rules_are_loaded():

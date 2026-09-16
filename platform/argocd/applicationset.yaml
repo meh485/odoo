@@ -2,9 +2,10 @@
 # adding a customer is a commit, removing one is a deletion, and drift is
 # reconciled continuously.
 #
-# acme is excluded rather than absent: it predates ArgoCD on this cluster, so it
-# is the one tenant still owned by a Helm release. Adopting it is a deliberate
-# act, and until then it is a limit recorded in DESIGN.md.
+# Every tenant is managed here, including acme, which predates ArgoCD on this
+# cluster. It was adopted rather than rebuilt: the chart declares the same
+# objects, and the credentials were already in the store, so ArgoCD took over
+# without rotating anything.
 apiVersion: argoproj.io/v1alpha1
 kind: ApplicationSet
 metadata:
@@ -22,8 +23,6 @@ spec:
         revision: main
         files:
           - path: "tenants/*.yaml"
-          - path: "tenants/acme.yaml"
-            exclude: true
   template:
     metadata:
       name: "odoo-{{.tenant.name}}"

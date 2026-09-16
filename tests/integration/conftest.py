@@ -80,15 +80,21 @@ def cluster() -> None:
 
 @pytest.fixture(scope="session")
 def tenants() -> list[str]:
-    """Tenants that are deployed, not merely declared in tenants/.
+    """Tenants that are actually deployed, not merely declared in tenants/.
 
-    A file under tenants/ is a request to install; only a Helm release means
-    the namespace exists. Asserting against a tenant that was never installed
-    reports a missing platform rather than a broken one.
+    Discovered from the label on the namespace rather than from `helm list`.
+    Intersecting with Helm releases was how this fixture used to work, and it
+    meant every tenant ArgoCD created was skipped: the suite stayed green while
+    one of them was serving nothing but 500s.
     """
     declared = {path.stem for path in (REPO_ROOT / "tenants").glob("*.yaml")}
-    installed = {release["name"] for release in helm_json("list", "-A")}
-    return sorted(declared & installed)
+    deployed = {
+        item["metadata"]["name"]
+        for item in kubectl_json(
+            "get", "namespaces", "-l", "app.kubernetes.io/name=odoo"
+        ).get("items", [])
+    }
+    return sorted(declared & deployed)
 
 
 @pytest.fixture(scope="session")
