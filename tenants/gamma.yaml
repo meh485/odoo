@@ -1,0 +1,20 @@
+tenant:
+  name: gamma
+  hostname: gamma.odoo.local
+
+odoo:
+  web:
+    replicas: 1
+    workers: 2
+
+postgres:
+  instances: 1
+
+backup:
+  # Credentials are seeded from the object store's credential, not committed.
+  enabled: true
+  destinationPath: "s3://odoo-backups/gamma"
+  endpointURL: "http://minio.storage.svc.cluster.local:9000"
+  filestore:
+    enabled: true
+    repository: "s3:http://minio.storage.svc.cluster.local:9000/odoo-backups/gamma-filestore"
