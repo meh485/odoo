@@ -3,6 +3,7 @@ secrets/
 *.local
 .local/
 sre-challenge.pdf
+HANDOFF.md
 .claude/
 .omo/
 __pycache__/
