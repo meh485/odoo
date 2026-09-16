@@ -6,6 +6,7 @@ from conftest import by_kind, helm_template, one
 DISABLED = {"observability": {"enabled": False}}
 ALERTS = {
     "OdooBackupStale",
+    "OdooBackupMissing",
     "OdooWalArchivingStalled",
     "OdooRestoreDrillFailed",
     "OdooCanaryFailed",
@@ -66,6 +67,15 @@ def test_backup_staleness_uses_the_verified_metric(manifests) -> None:
     # The metric name was read off the live instance manager, not assumed.
     exprs = {rule["alert"]: rule["expr"] for group in rules(helm_template()) for rule in group["rules"]}
     assert "cnpg_collector_last_available_backup_timestamp" in exprs["OdooBackupStale"]
+
+
+def test_a_tenant_that_never_backed_up_is_not_called_stale(manifests) -> None:
+    # Zero means "no backup yet", and it sits far enough in the past to satisfy
+    # the staleness threshold on its own, so the guard is what stops a new
+    # tenant from paging before its first scheduled run.
+    exprs = {rule["alert"]: rule["expr"] for group in rules(helm_template()) for rule in group["rules"]}
+    assert "> 0" in exprs["OdooBackupStale"]
+    assert "== 0" in exprs["OdooBackupMissing"]
 
 
 def test_sql_exporter_is_deployed_and_scraped(manifests) -> None:

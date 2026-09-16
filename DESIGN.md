@@ -211,7 +211,12 @@ when somebody opens an old invoice.
 Backup age is exported by the operator
 (`cnpg_collector_last_available_backup_timestamp`) and alerted on: a backup that
 has silently stopped is the industry's most common and most expensive silent
-failure.
+failure. The same metric reports zero until a cluster's first backup succeeds,
+so two rules cover it: staleness ignores the zero case, and a separate rule
+pages if a tenant is still at zero after its first scheduled run has passed.
+Without that split, either every new tenant pages immediately (a `0` timestamp
+is the epoch, which is always "stale") or a tenant whose backups never start is
+silent forever.
 
 ### The restore drill
 
@@ -241,7 +246,8 @@ stopped.
 
 | Failure | Expression, per tenant | Alert | Severity |
 |---|---|---|---|
-| Backups stopped | `time() - cnpg_collector_last_available_backup_timestamp > 93600` | `OdooBackupStale` | critical |
+| Backups stopped | `time() - cnpg_collector_last_available_backup_timestamp > 93600` guarded by `… > 0` | `OdooBackupStale` | critical |
+| Backups never started | `cnpg_collector_last_available_backup_timestamp == 0` for 26h | `OdooBackupMissing` | critical |
 | WAL archiving stalled | `cnpg_pg_stat_archiver_seconds_since_last_archival > 300` | `OdooWalArchivingStalled` | warning |
 | WAL archiving failing | `increase(cnpg_pg_stat_archiver_failed_count[1h]) > 0` | `OdooWalArchiveFailing` | warning |
 | Backups exist but will not restore | drill result, and the age of that result | `OdooRestoreDrillFailed`, `OdooRestoreDrillStale` | critical |

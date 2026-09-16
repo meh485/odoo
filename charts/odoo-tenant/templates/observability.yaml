@@ -87,12 +87,29 @@ spec:
       rules:
         - alert: OdooBackupStale
           # The daily base backup runs at 02:00; 26h catches a single missed run.
-          expr: time() - cnpg_collector_last_available_backup_timestamp{namespace="{{ $tenant }}"} > 93600
+          # A cluster that has never taken a backup reports the timestamp as
+          # zero, and `time() - 0` is always stale, so without the guard every
+          # new tenant pages on its very first scrape.
+          expr: |
+            time() - cnpg_collector_last_available_backup_timestamp{namespace="{{ $tenant }}"} > 93600
+              and
+            cnpg_collector_last_available_backup_timestamp{namespace="{{ $tenant }}"} > 0
           for: 15m
           labels:
             severity: critical
           annotations:
             summary: "No successful database backup for {{ $tenant }} in over 26 hours"
+        - alert: OdooBackupMissing
+          # The other half of the story: a cluster whose first backup never
+          # completes stays at zero forever, which the staleness rule above
+          # deliberately ignores. 26h here means the first scheduled run was
+          # missed, not that the tenant is new.
+          expr: cnpg_collector_last_available_backup_timestamp{namespace="{{ $tenant }}"} == 0
+          for: 26h
+          labels:
+            severity: critical
+          annotations:
+            summary: "{{ $tenant }} has never completed a database backup"
         - alert: OdooWalArchivingStalled
           expr: cnpg_pg_stat_archiver_seconds_since_last_archival{namespace="{{ $tenant }}"} > 300
           for: 10m

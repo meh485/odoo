@@ -131,6 +131,7 @@ def test_expected_alert_rules_are_loaded():
         "OdooCanaryFailed",
         "OdooCanaryStale",
         "OdooBackupStale",
+        "OdooBackupMissing",
         "OdooRestoreDrillFailed",
         "OdooCronStalled",
         "OdooLockContention",
