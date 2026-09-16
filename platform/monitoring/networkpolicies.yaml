@@ -166,3 +166,32 @@ spec:
               app.kubernetes.io/name: prometheus
       ports:
         - { protocol: TCP, port: 9090 }
+---
+# Outbound HTTP/HTTPS for the monitoring namespace. Grafana in particular
+# fetches plugin and update metadata, and there is no in-cluster mirror.
+#
+# This is a deliberate, local-only relaxation: it is wider than the tenant
+# egress rule, which is per-tenant and opt-in. Private ranges and the cloud
+# metadata endpoint stay excluded, so "internet" never means "the rest of the
+# cluster" or "the node's credentials". In a real deployment this narrows to
+# the specific destinations that are needed.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: monitoring-allow-egress-internet
+  namespace: monitoring
+spec:
+  podSelector: {}
+  policyTypes: [Egress]
+  egress:
+    - to:
+        - ipBlock:
+            cidr: 0.0.0.0/0
+            except:
+              - 10.0.0.0/8
+              - 172.16.0.0/12
+              - 192.168.0.0/16
+              - 169.254.169.254/32
+      ports:
+        - { protocol: TCP, port: 80 }
+        - { protocol: TCP, port: 443 }
