@@ -109,18 +109,9 @@ grafana:
       # Picks up any ConfigMap labelled grafana_dashboard in this namespace.
       enabled: true
       label: grafana_dashboard
-  datasources:
-    datasources.yaml:
-      apiVersion: 1
-      datasources:
-        - name: Prometheus
-          # A fixed uid so the provisioned dashboard can reference it without
-          # depending on an id Grafana assigns at runtime.
-          uid: prometheus
-          type: prometheus
-          url: http://kube-prometheus-stack-prometheus.monitoring.svc.cluster.local:9090
-          isDefault: true
-          editable: false
+  # The Prometheus datasource is provisioned by the chart itself (uid
+  # "prometheus"); adding another default here made Grafana refuse to start,
+  # because only one datasource per organization may be the default.
 
 prometheus-node-exporter:
   enabled: false
