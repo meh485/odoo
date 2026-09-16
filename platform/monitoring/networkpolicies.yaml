@@ -23,6 +23,10 @@ spec:
       ports:
         - { protocol: TCP, port: 443 }
         - { protocol: TCP, port: 6443 }
+        # kubelet and kube-proxy serve metrics on the node address, not on a
+        # pod IP, so no pod or namespace selector can reach them.
+        - { protocol: TCP, port: 10249 }
+        - { protocol: TCP, port: 10250 }
     # Every tenant's Postgres, pooler and canary metrics.
     - to:
         - namespaceSelector:
@@ -34,24 +38,20 @@ spec:
         - { protocol: TCP, port: 9101 }
         # The tenant's database-domain exporter (sql_exporter's default port).
         - { protocol: TCP, port: 9399 }
+    # Everything in this namespace, because Prometheus scrapes the operator,
+    # Grafana, Alertmanager, kube-state-metrics and the pushgateway, and
+    # enumerating each component's metrics port proved fragile: three of them
+    # were silently unreachable. This namespace is one trust domain, and the
+    # cluster-wide and tenant rules above carry the security story.
     - to:
-        - podSelector:
-            matchLabels:
-              app.kubernetes.io/name: kube-state-metrics
-      ports:
-        - { protocol: TCP, port: 8080 }
+        - podSelector: {}
+    # CoreDNS is a pod in kube-system, so the rule above cannot reach it.
     - to:
-        - podSelector:
+        - namespaceSelector:
             matchLabels:
-              app.kubernetes.io/name: alertmanager
+              kubernetes.io/metadata.name: kube-system
       ports:
-        - { protocol: TCP, port: 9093 }
-    - to:
-        - podSelector:
-            matchLabels:
-              app: pushgateway
-      ports:
-        - { protocol: TCP, port: 9091 }
+        - { protocol: TCP, port: 9153 }
 ---
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
@@ -69,7 +69,28 @@ spec:
             matchLabels:
               app.kubernetes.io/name: prometheus
       ports:
+        - { protocol: TCP, port: 8080 }
         - { protocol: TCP, port: 9093 }
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: monitoring-allow-prometheus-operator-ingress
+  namespace: monitoring
+spec:
+  podSelector:
+    matchLabels:
+      app: kube-prometheus-stack-operator
+  policyTypes: [Ingress]
+  ingress:
+    # The operator serves its own metrics over TLS on 10250 and the chart's
+    # ServiceMonitor scrapes it, so without this allow that target is down.
+    - from:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: prometheus
+      ports:
+        - { protocol: TCP, port: 10250 }
 ---
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
@@ -146,6 +167,11 @@ spec:
         - namespaceSelector:
             matchLabels:
               kubernetes.io/metadata.name: envoy-gateway-system
+        # Prometheus scrapes Grafana's own metrics on the same port; without
+        # this the Grafana target is permanently down.
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: prometheus
       ports:
         - { protocol: TCP, port: 3000 }
 ---

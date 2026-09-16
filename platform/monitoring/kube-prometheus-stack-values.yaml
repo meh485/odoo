@@ -2,12 +2,18 @@
 # Pod Security Standard the monitoring namespace enforces.
 #
 # Deliberately disabled:
-#   - node-exporter and kube-state-metrics, which need host access that
-#     restricted forbids; the metrics this project pages on come from the
-#     tenants and from CloudNativePG, not from the node.
-#   - the default rule set, because this chart ships the rules that matter.
-#   - the bundled Grafana, which is added separately so it can sit behind the
-#     gateway with the other dashboards.
+#   - node-exporter, which needs host access that restricted forbids; the
+#     signals this project pages on come from the tenants, not the node.
+#   - the default rule set, because the chart in charts/odoo-tenant ships the
+#     rules that matter.
+#   - the control-plane monitors (etcd, scheduler, controller-manager), whose
+#     endpoints kubeadm binds to 127.0.0.1 and are therefore unscrapable from
+#     the pod network. That is a kubeadm and kind trait, not a property of this
+#     deployment; a managed control plane would enable them and the monitors
+#     would already be correct.
+#
+# kube-state-metrics is kept: the container restart metrics on the
+# tenant-health dashboard come from it.
 #
 # Selecting rules, ServiceMonitors and PodMonitors in every namespace is what
 # makes a new tenant observable the moment its namespace exists: there is no
@@ -118,7 +124,19 @@ grafana:
 prometheus-node-exporter:
   enabled: false
 
-kube-state-metrics:
+kubeEtcd:
+  enabled: false
+
+kubeScheduler:
+  enabled: false
+
+kubeControllerManager:
+  enabled: false
+
+# kube-proxy is included for the same reason as the three above: kind runs it
+# with its metrics address bound to 127.0.0.1, so the node-address scrape can
+# never succeed. kubelet and CoreDNS are kept and do work.
+kubeProxy:
   enabled: false
 
 defaultRules:
