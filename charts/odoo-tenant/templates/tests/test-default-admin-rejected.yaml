@@ -1,0 +1,51 @@
+{{- $tenant := include "odoo.tenant" . }}
+# Initialising an Odoo database from the CLI leaves an `admin` account whose
+# password is the string "admin", and a freshly provisioned tenant is reachable
+# through the gateway with that credential the moment it exists. The
+# post-install Job resets it from a mounted secret; this test turns that
+# guarantee into something the pipeline checks rather than something a runbook
+# claims. Reached directly, bypassing the Gateway, so it asserts the credential
+# itself and not the route to it.
+apiVersion: v1
+kind: Pod
+metadata:
+  name: {{ $tenant }}-test-default-admin
+  namespace: {{ $tenant }}
+  labels:
+    {{- include "odoo.labels" . | nindent 4 }}
+    app.kubernetes.io/component: test
+  annotations:
+    helm.sh/hook: test
+    helm.sh/hook-delete-policy: hook-succeeded,before-hook-creation
+spec:
+  restartPolicy: Never
+  automountServiceAccountToken: false
+  securityContext:
+    {{- include "odoo.podSecurityContext" . | nindent 4 }}
+  containers:
+    - name: curl
+      image: curlimages/curl:8.10.1
+      securityContext:
+        {{- include "odoo.containerSecurityContext" . | nindent 8 }}
+      env:
+        - { name: HOME, value: /tmp }
+      command: ["/bin/sh", "-c"]
+      args:
+        - |
+          set -e
+          url="http://{{ $tenant }}-web:8069/web/session/authenticate"
+          body="$(curl -s --max-time 10 -H 'Content-Type: application/json' \
+            -d '{"jsonrpc": "2.0", "method": "call", "params": {"db": "{{ $tenant }}", "login": "admin", "password": "admin"}, "id": 1}' "$url")"
+          echo "POST ${url} -> ${body}"
+          # Two rejection shapes: the JSON-RPC path raises AccessDenied for a
+          # bad credential, while a login form answers with uid false. Either
+          # one means no session was granted; a success would match neither.
+          echo "$body" | grep -Eq '"uid"[[:space:]]*:[[:space:]]*false|AccessDenied'
+      resources:
+        requests: { cpu: 10m, memory: 32Mi }
+        limits: { cpu: 100m, memory: 64Mi }
+      volumeMounts:
+        - { name: tmp, mountPath: /tmp }
+  volumes:
+    - name: tmp
+      emptyDir: {}

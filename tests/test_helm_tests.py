@@ -34,6 +34,19 @@ def test_test_pods_are_deleted_after_running(manifests) -> None:
         assert "hook-succeeded" in policy
 
 
+def test_a_test_asserts_the_default_admin_password_is_rejected(manifests) -> None:
+    pod = next(
+        pod for pod in hook_pods(manifests)
+        if "default-admin" in pod["metadata"]["name"]
+    )
+    args = " ".join(pod["spec"]["containers"][0]["args"])
+    assert "-web:8069/web/session/authenticate" in args
+    assert '"login": "admin"' in args
+    assert '"password": "admin"' in args
+    assert "AccessDenied" in args
+    assert '"uid"' in args
+
+
 def test_database_test_bypasses_the_gateway(manifests) -> None:
     # It must hit the web Service directly, or it proves nothing about list_db.
     pod = next(pod for pod in hook_pods(manifests) if "database-manager" in pod["metadata"]["name"])
