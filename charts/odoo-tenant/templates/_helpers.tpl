@@ -44,6 +44,20 @@ capabilities:
 {{- .Values.odoo.adminPassword.existingSecret | default (printf "%s-odoo-admin" (include "odoo.tenant" .)) -}}
 {{- end -}}
 
+{{/* The same rule for the other three credentials: referenced by name, never
+     rendered, so nothing in a manifest depends on cluster state. */}}
+{{- define "odoo.canarySecretName" -}}
+{{- .Values.canary.existingSecret | default (printf "%s-canary" (include "odoo.tenant" .)) -}}
+{{- end -}}
+
+{{- define "odoo.backupSecretName" -}}
+{{- .Values.backup.existingSecret | default (printf "%s-backup-credentials" (include "odoo.tenant" .)) -}}
+{{- end -}}
+
+{{- define "odoo.resticSecretName" -}}
+{{- .Values.backup.filestore.existingSecret | default (printf "%s-restic" (include "odoo.tenant" .)) -}}
+{{- end -}}
+
 {{/* Credentials projected into one directory. Two Secrets cannot mount at the
      same path, and no password may reach an environment variable. */}}
 {{- define "odoo.credentialVolume" -}}

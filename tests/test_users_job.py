@@ -1,7 +1,5 @@
-import pathlib
-
 import pytest
-from conftest import one
+from conftest import by_kind, one
 
 
 def test_a_users_job_exists(manifests):
@@ -26,16 +24,19 @@ def test_users_job_takes_no_password_from_argv_or_env(manifests):
         assert "secretKeyRef" not in str(entry.get("valueFrom", {})), entry["name"]
 
 
-def test_canary_secret_is_rendered(manifests):
-    assert one(manifests, "Secret", "canary")["data"]["canary_password"]
+def test_the_chart_does_not_generate_the_canary_secret(manifests):
+    # Same rule as the admin password: the Secret is created out of band and
+    # only referenced, so a render never depends on cluster state.
+    rendered = {secret["metadata"]["name"] for secret in by_kind(manifests, "Secret")}
+    assert not {name for name in rendered if name.endswith("-canary")}, (
+        f"the chart renders the canary Secret: {sorted(rendered)}"
+    )
 
 
-def test_canary_secret_survives_an_upgrade():
-    # Regenerating the canary password on every upgrade leaves the probe
-    # authenticating with a credential the database no longer accepts, which
-    # presents as a false outage.
-    source = pathlib.Path("charts/odoo-tenant/templates/canary-secret.yaml").read_text()
-    assert "lookup" in source
+def test_the_probe_mounts_the_canary_secret_by_name(manifests):
+    pod = one(manifests, "Deployment", "-canary")["spec"]["template"]["spec"]
+    mounted = {v["secret"]["secretName"] for v in pod["volumes"] if "secret" in v}
+    assert mounted == {"acme-canary"}
 
 
 @pytest.mark.parametrize("job", ["odoo-init", "odoo-users"])

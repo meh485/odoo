@@ -65,11 +65,11 @@ spec:
                 claimName: {{ $tenant }}-filestore
             - name: object-store-credentials
               secret:
-                secretName: {{ $tenant }}-backup-credentials
+                secretName: {{ include "odoo.backupSecretName" . }}
                 defaultMode: 0400
             - name: restic-password
               secret:
-                secretName: {{ $tenant }}-restic
+                secretName: {{ include "odoo.resticSecretName" . }}
                 defaultMode: 0400
             - name: tmp
               emptyDir: {}

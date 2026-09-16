@@ -68,12 +68,20 @@ def test_filestore_job_mounts_both_credentials_as_files():
     assert "acme-restic" in secret_names
 
 
-def test_restic_password_secret_is_rendered_and_preserved_across_upgrades():
-    import pathlib
-    secret = one(helm_template(BACKUP), "Secret", "restic")
-    assert secret["data"]["restic_password"]
-    source = pathlib.Path("charts/odoo-tenant/templates/filestore-backup-secret.yaml").read_text()
-    assert "lookup" in source, "the restic password must survive an upgrade"
+def test_the_chart_does_not_generate_the_restic_secret(manifests):
+    # A restic password generated during a render would change on every sync,
+    # and every snapshot written under the previous password becomes
+    # unreadable, which is the opposite of a backup.
+    rendered = {secret["metadata"]["name"] for secret in by_kind(manifests, "Secret")}
+    assert not {name for name in rendered if name.endswith("-restic")}, (
+        f"the chart renders the restic Secret: {sorted(rendered)}"
+    )
+
+
+def test_the_backup_job_mounts_the_restic_secret_by_name():
+    pod = job(helm_template(BACKUP))["spec"]["jobTemplate"]["spec"]["template"]["spec"]
+    mounted = {v["secret"]["secretName"] for v in pod["volumes"] if "secret" in v}
+    assert "acme-restic" in mounted
 
 
 def test_filestore_job_is_hardened():

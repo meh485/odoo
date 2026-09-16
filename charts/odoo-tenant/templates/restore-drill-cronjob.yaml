@@ -46,7 +46,7 @@ spec:
                 - { name: DB_NAME, value: {{ $tenant | quote }} }
                 - { name: BACKUP_DESTINATION_PATH, value: {{ .Values.backup.destinationPath | quote }} }
                 - { name: BACKUP_ENDPOINT_URL, value: {{ .Values.backup.endpointURL | quote }} }
-                - { name: BACKUP_CREDENTIALS_SECRET, value: "{{ $tenant }}-backup-credentials" }
+                - { name: BACKUP_CREDENTIALS_SECRET, value: {{ include "odoo.backupSecretName" . | quote }} }
                 - { name: PUSHGATEWAY_URL, value: "http://pushgateway.{{ .Values.network.pushgatewayNamespace }}.svc.cluster.local:{{ .Values.network.pushgatewayPort }}" }
                 - { name: MAX_WAIT_SECONDS, value: "900" }
                 # psql writes nothing under a read-only root; a writable HOME

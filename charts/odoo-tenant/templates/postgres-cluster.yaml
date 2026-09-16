@@ -61,10 +61,10 @@ spec:
       endpointURL: {{ required "backup.endpointURL is required when backup.enabled is true" .Values.backup.endpointURL }}
       s3Credentials:
         accessKeyId:
-          name: {{ $tenant }}-backup-credentials
+          name: {{ include "odoo.backupSecretName" . }}
           key: ACCESS_KEY_ID
         secretAccessKey:
-          name: {{ $tenant }}-backup-credentials
+          name: {{ include "odoo.backupSecretName" . }}
           key: ACCESS_SECRET_KEY
       wal:
         compression: gzip

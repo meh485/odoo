@@ -1,8 +1,28 @@
+import pathlib
+
 from conftest import helm_template
+
+TEMPLATES = pathlib.Path(__file__).resolve().parents[1] / "charts" / "odoo-tenant" / "templates"
 
 
 def test_chart_renders(manifests):
     assert manifests, "chart rendered no manifests"
+
+
+def test_no_template_generates_a_credential_at_render_time():
+    # A credential produced during a render makes the manifests depend on
+    # cluster state: Helm's lookup cannot run under Argo CD, so the value would
+    # change on every sync, the application would never report Synced, and
+    # whatever consumes it would be rotated. Every credential in this chart is
+    # referenced from a Secret created out of band instead -- seeded by
+    # scripts locally, filled by External Secrets in production.
+    offenders: dict[str, list[str]] = {}
+    for path in sorted(TEMPLATES.rglob("*.yaml")):
+        text = path.read_text()
+        for function in ("randAlphaNum", "randAlpha", 'lookup "v1"'):
+            if function in text:
+                offenders.setdefault(path.name, []).append(function)
+    assert not offenders, f"templates generate a credential at render time: {offenders}"
 
 
 # Cluster-scoped kinds have no namespace; setting one on them is rejected

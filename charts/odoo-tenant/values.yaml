@@ -68,6 +68,13 @@ canary:
   # on this cluster while the database had no schema and every real request
   # failed, which is why the probe authenticates instead of checking health.
   enabled: true
+  # Name of a Secret holding the probe's password under canary_password. The
+  # chart references it and never creates it, for the same reason as the admin
+  # password: a value generated during a render changes on every render, so
+  # Argo CD would never report Synced. Defaults to {tenant}-canary, which
+  # scripts/seed-tenant-credentials.sh creates locally and External Secrets
+  # fills in production.
+  existingSecret: ""
   image:
     repository: odoo-canary
     tag: "0.1.0"
@@ -86,12 +93,12 @@ backup:
   # time here -- a five-field entry is accepted, not rejected.
   schedule: "0 0 2 * * *"
   retentionPolicy: "30d"
-  # Where a platform team manages the object store, supply the credential here
-  # so the rendered Secret matches what the store accepts. When both are empty
-  # the chart generates a Secret and preserves it across upgrades; the platform
-  # must then be provisioned with the same values.
-  accessKeyId: ""
-  secretAccessKey: ""
+  # Name of a Secret holding ACCESS_KEY_ID and ACCESS_SECRET_KEY for the object
+  # store. Referenced, never created, for the same reason as every other
+  # credential here. Empty means {tenant}-backup-credentials, which
+  # scripts/seed-backup-credentials.sh fills from the object store's own
+  # credential; External Secrets fills the same Secret in production.
+  existingSecret: ""
   drillImage:
     repository: odoo-restore-drill
     tag: "0.1.0"
@@ -104,6 +111,10 @@ backup:
     # only the database restores a tenant whose invoices and images are all
     # missing, so the filestore is backed up separately, to its own repository.
     enabled: false
+    # Name of the Secret holding restic_password. Referenced, never generated:
+    # a restic password that changed on every render would make every existing
+    # snapshot unreadable. Defaults to {tenant}-restic.
+    existingSecret: ""
     # 02:30, after the 02:00 database backup has started.
     schedule: "30 2 * * *"
     # e.g. s3:http://minio.storage.svc.cluster.local:9000/odoo-backups/acme-filestore

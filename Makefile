@@ -27,7 +27,7 @@ tenant: ## Install or upgrade a tenant: make tenant TENANT=acme
 	@test -f tenants/$(TENANT).yaml || { echo "no tenants/$(TENANT).yaml to install"; exit 1; }
 	@kubectl create namespace "$(TENANT)" --dry-run=client -o yaml | kubectl apply -f - >/dev/null
 	@scripts/seed-backup-credentials.sh "$(TENANT)"
-	@scripts/seed-admin-credentials.sh "$(TENANT)"
+	@scripts/seed-tenant-credentials.sh "$(TENANT)"
 	@helm upgrade --install "$(TENANT)" $(CHART) \
 		--namespace "$(TENANT)" \
 		--values tenants/$(TENANT).yaml

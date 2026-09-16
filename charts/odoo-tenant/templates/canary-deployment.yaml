@@ -63,7 +63,7 @@ spec:
         # and a compromised probe should not hold them.
         - name: db-credentials
           secret:
-            secretName: {{ $tenant }}-canary
+            secretName: {{ include "odoo.canarySecretName" . }}
             defaultMode: 0400
 ---
 apiVersion: v1
