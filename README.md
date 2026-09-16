@@ -18,14 +18,38 @@ tests.
 
 ```bash
 make cluster              # three-node kind cluster named odoo
-make platform             # CloudNativePG, Envoy Gateway, monitoring, MinIO
-make tenant TENANT=acme   # provision a customer from tenants/acme.yaml
+make platform             # operators, gateway, monitoring, MinIO, ArgoCD
+make seed TENANT=acme     # the credentials the chart only references
+make tenant TENANT=acme   # provision acme with Helm
 ```
 
-Provisioning a tenant is a values file, not a command: the chart is
-`charts/odoo-tenant`, and `tenants/` holds one file per customer. In a real
-cluster the committed ArgoCD `ApplicationSet` creates an `Application` per
-file; locally `make tenant` runs the same chart with `helm upgrade --install`.
+## Provisioning a tenant
+
+A tenant is a values file in `tenants/`. There are two ways to apply it, and
+they render the same chart.
+
+**The GitOps path (ArgoCD).** `make platform` installs ArgoCD, and the committed
+`ApplicationSet` creates one `Application` per file in `tenants/`. Adding a
+customer is a commit:
+
+```bash
+cp tenants/beta.yaml tenants/newco.yaml   # edit name, hostname, backup paths
+make seed TENANT=newco                    # namespace + the four Secrets
+git add tenants/newco.yaml && git commit -m "tenant: newco" && git push
+kubectl -n argocd get applications -w     # watch it sync
+```
+
+Seed first: the chart only *references* the credentials (generating them in a
+template would change them on every render, and ArgoCD would never report
+Synced), and the schema-init job mounts them. `make seed` is idempotent.
+
+ArgoCD is reachable with
+`kubectl -n argocd port-forward svc/argocd-server 8080:443`, logging in as
+`admin` with the password from the `argocd-initial-admin-secret`.
+
+**The Helm path (local iteration).** `make tenant TENANT=acme` creates the
+namespace, seeds the same credentials and runs `helm upgrade --install`.
+
 
 ## Reaching the running stack
 

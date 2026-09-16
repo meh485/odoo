@@ -1,0 +1,41 @@
+# ArgoCD health checks for CloudNativePG's custom resources.
+#
+# Without these, ArgoCD cannot assess a Cluster or a Pooler: it reports no
+# health for them and then waits for them to become healthy anyway, so a
+# sync-wave that contains one never completes. The tenant's bootstrap stalls at
+# the Pooler and the schema init job is never created.
+#
+# This file patches the argocd-cm ConfigMap. `kubectl apply` merges the data
+# keys, so ArgoCD's own settings survive.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: argocd-cm
+  namespace: argocd
+  labels:
+    app.kubernetes.io/part-of: argocd
+data:
+  resource.customizations.health.postgresql.cnpg.io_Cluster: |
+    hs = {}
+    if obj.status ~= nil and obj.status.phase == "Cluster in healthy state" then
+      hs.status = "Healthy"
+      hs.message = "Cluster is ready"
+    else
+      hs.status = "Progressing"
+      hs.message = obj.status and obj.status.phase or "waiting for the operator"
+    end
+    return hs
+  # The Pooler's status does not carry a ready count, and the operator owns its
+  # availability, so this reports Healthy once the operator has reconciled it.
+  # What actually guarantees the pooler is serving is the init job's own retry
+  # loop, which connects through it.
+  resource.customizations.health.postgresql.cnpg.io_Pooler: |
+    hs = {}
+    if obj.status ~= nil and obj.status.secrets ~= nil then
+      hs.status = "Healthy"
+      hs.message = "Pooler reconciled by the operator"
+    else
+      hs.status = "Progressing"
+      hs.message = "waiting for the operator"
+    end
+    return hs

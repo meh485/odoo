@@ -10,8 +10,8 @@ NAMESPACE="${TENANT}"
 SECRET="${TENANT}-backup-credentials"
 
 if ! kubectl get namespace "$NAMESPACE" >/dev/null 2>&1; then
-  echo "namespace ${NAMESPACE} does not exist yet; skipping"
-  exit 0
+  kubectl create namespace "$NAMESPACE" >/dev/null
+  echo "created namespace ${NAMESPACE}"
 fi
 
 # A tenant created before the object store exists has nothing to be seeded from.

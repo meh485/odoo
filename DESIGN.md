@@ -80,10 +80,49 @@ expresses the ownership split that matters at 500 customers: the `Gateway`
 belongs to the platform team, each tenant's `HTTPRoute` to the tenant.
 
 **Helm chart plus ArgoCD ApplicationSet.** One chart, one values file per tenant
-in git, one `Application` per tenant generated from a git directory generator,
-so provisioning is a commit and drift is continuously reconciled. ArgoCD itself
-is not run on the demo cluster; the manifest is committed and `helm upgrade
---install` demonstrates the same chart.
+in git, one `Application` per tenant from a git files generator, so provisioning
+is a commit and drift is continuously reconciled. ArgoCD runs on the demo
+cluster too, installed by `scripts/platform-install.sh`, and provisions every
+tenant except `acme` — which predates it here and is still installed by Helm,
+because two owners for one set of objects is the conflict this repository has
+already been bitten by once.
+
+### Bootstrapping a tenant in order
+
+A tenant cannot be applied all at once: the schema-init job needs the database,
+and the web deployment needs the schema. Helm expresses that ordering with
+post-install hook weights. ArgoCD expresses it with sync-waves, and the two
+cannot be the same object: ArgoCD maps `helm.sh/hook: post-install` to a PostSync
+hook, and PostSync runs only after every other resource is healthy — which the
+web deployment never is until the init job has run. The sync waits on the
+resource that waits on the job.
+
+So the two one-time jobs switch annotation sets on an `argocd.enabled` value
+that only the ApplicationSet sets. Helm keeps its hooks and weights; ArgoCD gets
+Sync hooks ordered by wave:
+
+| Wave | Resources |
+|---|---|
+| 0 | namespace, configmaps, network policies, services, quota |
+| 1 | CloudNativePG `Cluster` |
+| 2 | `Pooler` |
+| 3 | filestore PVC and the schema-init job |
+| 4 | the users job, which sets the admin and canary passwords |
+| 5 | web, cron, canary, sql_exporter |
+
+The PVC sits in wave 3 with its first consumer: the storage class binds on first
+consumer, so the claim is Pending — and therefore not healthy to ArgoCD — until a
+pod mounts it.
+
+ArgoCD also has to be told how to assess CloudNativePG's resources
+(`platform/argocd/health-checks.yaml`). Without a health check it reports no
+health for a `Cluster` or a `Pooler` and then waits for them to become healthy
+anyway, so that wave never completes.
+
+This is the one place the chart renders differently per platform, and it is the
+minimum such difference: everything else is identical under `helm template` and
+under ArgoCD, and a test asserts the wave ordering so a reordered bootstrap
+fails the suite rather than the demo.
 
 ## Security hardening
 
@@ -357,8 +396,18 @@ Everything below is a real gap, not a hypothetical:
   the same hour.
 - **No multi-region or active-active.** Single region with tested recovery, as
   the brief allows.
-- **ArgoCD is committed, not running here.** `helm upgrade --install`
-  demonstrates the same chart; the ApplicationSet is exercised by unit tests.
+- **`acme` is not ArgoCD-managed yet.** It predates ArgoCD on this cluster and
+  is still a Helm release. Adopting it is a deliberate act, because two owners
+  for one set of objects is the conflict this repository has already been bitten
+  by twice.
+- **The integration suite does not see ArgoCD-provisioned tenants.** Its fixture
+  intersects `tenants/*.yaml` with Helm releases, so a tenant created by ArgoCD
+  is skipped rather than asserted. That is why the suite passed while `beta` was
+  broken, and it has to be fixed before it can be trusted as a gate.
+- **ArgoCD reads this repository with a deploy key** generated for the demo,
+  read-only and revocable in one command. A real installation uses whatever
+  credential the organisation already has, and External Secrets would supply the
+  tenant credentials rather than a seed script.
 
 ## How to verify any of this
 

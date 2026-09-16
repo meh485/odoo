@@ -32,6 +32,12 @@ tenant: ## Install or upgrade a tenant: make tenant TENANT=acme
 		--namespace "$(TENANT)" \
 		--values tenants/$(TENANT).yaml
 
+.PHONY: seed
+seed: ## Seed a tenant's out-of-band credentials for the ArgoCD path: make seed TENANT=acme
+	@test -n "$(TENANT)" || { echo "TENANT is required, e.g. make seed TENANT=acme"; exit 1; }
+	@scripts/seed-tenant-credentials.sh "$(TENANT)"
+	@scripts/seed-backup-credentials.sh "$(TENANT)"
+
 .PHONY: lint
 lint: ## Lint the chart
 	@helm lint $(CHART) --set tenant.name=acme --set tenant.hostname=acme.odoo.local

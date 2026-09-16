@@ -15,9 +15,13 @@ set -euo pipefail
 TENANT="${1:?usage: seed-tenant-credentials.sh TENANT}"
 NAMESPACE="${TENANT}"
 
+# Create the namespace rather than skipping: with ArgoCD the credentials have to
+# exist before the first sync reaches the job that mounts them, and seeding
+# before pushing the tenant file is the sane order. ArgoCD then adopts this
+# namespace and applies the chart's Pod Security labels to it.
 if ! kubectl get namespace "$NAMESPACE" >/dev/null 2>&1; then
-  echo "namespace ${NAMESPACE} does not exist yet; skipping"
-  exit 0
+  kubectl create namespace "$NAMESPACE" >/dev/null
+  echo "created namespace ${NAMESPACE}"
 fi
 
 # seed SECRET KEY [SUPPLIED]
