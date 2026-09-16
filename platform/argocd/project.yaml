@@ -1,0 +1,26 @@
+# The ArgoCD project that tenant Applications live in. Without it the
+# ApplicationSet creates Applications referencing a project that does not
+# exist, and every one of them fails to sync.
+#
+# The grants stay narrow on purpose: tenants come from one repository, they go
+# to the cluster ArgoCD runs in, and the only cluster-scoped object a tenant
+# owns is its own Namespace (the chart renders it, and the ApplicationSet sets
+# CreateNamespace=false so ArgoCD does not race it).
+apiVersion: argoproj.io/v1alpha1
+kind: AppProject
+metadata:
+  name: odoo
+  namespace: argocd
+spec:
+  description: Odoo tenants, one Application per file under tenants/
+  sourceRepos:
+    - git@github.com:meh485/odoo.git
+  destinations:
+    - server: https://kubernetes.default.svc
+      namespace: "*"
+  clusterResourceWhitelist:
+    - group: ""
+      kind: Namespace
+  namespaceResourceWhitelist:
+    - group: "*"
+      kind: "*"

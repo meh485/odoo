@@ -1,7 +1,13 @@
-# One Application per file in tenants/. ArgoCD is not run on the local cluster —
-# `make tenant` exercises the same chart — but the manifest is committed so the
-# provisioning mechanism is reviewable: adding a customer is a commit, removing
-# one is a deletion, and drift is reconciled continuously.
+# One Application per file in tenants/. This is the tenant provisioning path:
+# adding a customer is a commit, removing one is a deletion, and drift is
+# reconciled continuously.
+#
+# acme is excluded rather than absent: it was installed by `helm upgrade` before
+# ArgoCD existed on this cluster, and two owners for one set of objects is
+# exactly the conflict this repository already hit once, with the CloudNativePG
+# PodMonitors. Adopting it is a deliberate act -- drop the exclude and stop
+# using `make tenant` for that tenant -- and until then it is a limit recorded
+# in DESIGN.md.
 apiVersion: argoproj.io/v1alpha1
 kind: ApplicationSet
 metadata:
@@ -10,17 +16,19 @@ metadata:
 spec:
   generators:
     - git:
-        repoURL: https://github.com/much-consulting/odoo-platform.git
+        repoURL: git@github.com:meh485/odoo.git
         revision: main
         files:
           - path: "tenants/*.yaml"
+          - path: "tenants/acme.yaml"
+            exclude: true
   template:
     metadata:
       name: "odoo-{{.tenant.name}}"
     spec:
       project: odoo
       source:
-        repoURL: https://github.com/much-consulting/odoo-platform.git
+        repoURL: git@github.com:meh485/odoo.git
         targetRevision: main
         path: charts/odoo-tenant
         helm:

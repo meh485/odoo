@@ -1,17 +1,57 @@
-"""ArgoCD is not run locally, but the ApplicationSet is committed so the
-provisioning mechanism is reviewable and testable.
+"""ArgoCD provisions tenants from git, so the committed ApplicationSet, the
+project it references and the repository it points at are all asserted here.
 """
+import re
+import subprocess
 from pathlib import Path
 
+import pytest
 import yaml
 
 REPO = Path(__file__).resolve().parents[1]
-APPSET = REPO / "platform" / "argocd" / "applicationset.yaml"
+ARGOCD = REPO / "platform" / "argocd"
+APPSET = ARGOCD / "applicationset.yaml"
 TENANTS = REPO / "tenants"
 
 
 def appset() -> dict:
     return yaml.safe_load(APPSET.read_text())
+
+
+def _slug(url: str) -> str:
+    """owner/repo, from an https or ssh remote URL."""
+    slug = re.sub(r"^(git@|ssh://git@|https://)", "", url.strip())
+    slug = re.sub(r"^github\.com[:/]", "", slug)
+    return slug.removesuffix(".git")
+
+
+def test_the_referenced_project_exists() -> None:
+    # An Application pointing at a project that was never created fails to
+    # sync, and nothing else in the repository would notice.
+    projects = {
+        document["metadata"]["name"]
+        for path in ARGOCD.glob("*.yaml")
+        for document in yaml.safe_load_all(path.read_text())
+        if document and document.get("kind") == "AppProject"
+    }
+    assert appset()["spec"]["template"]["spec"]["project"] in projects
+
+
+def test_argocd_points_at_the_repository_we_push_to() -> None:
+    # Syncing from a different repository than the one this checkout pushes to
+    # is a silent failure: the manifests under review and the manifests being
+    # reconciled would not be the same ones.
+    result = subprocess.run(
+        ["git", "remote", "get-url", "origin"], cwd=REPO, capture_output=True, text=True
+    )
+    if result.returncode != 0:
+        pytest.skip("no origin remote to compare against")
+    expected = _slug(result.stdout)
+
+    git = next(g["git"] for g in appset()["spec"]["generators"] if "git" in g)
+    source = appset()["spec"]["template"]["spec"]["source"]
+    assert _slug(git["repoURL"]) == expected
+    assert _slug(source["repoURL"]) == expected
 
 
 def test_generator_discovers_tenants_from_git() -> None:
