@@ -18,3 +18,10 @@ backup:
   filestore:
     enabled: true
     repository: "s3:http://minio.storage.svc.cluster.local:9000/odoo-backups/newco-filestore"
+
+network:
+  egress:
+    internet:
+      # The in-app module browser and payment/OAuth callbacks reach out.
+      # Enabled for this tenant; the chart default stays false.
+      enabled: true

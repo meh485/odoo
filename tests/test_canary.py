@@ -87,3 +87,20 @@ def test_read_secret_rejects_a_missing_file(tmp_path):
         assert exc.code != 0
     else:
         raise AssertionError("expected SystemExit on a missing secret")
+
+
+def test_a_failed_probe_discards_the_session():
+    # A canary that started before its database existed can hold a session the
+    # server will never accept again, and would then report a permanent false
+    # outage. The next probe has to start clean.
+    session = _session({"result": {"uid": 2}}, login_status=500)
+    result = canary.run_once(session, "http://odoo:8069", "acme", "canary", "pw")
+    assert result.success is False
+    session.cookies.clear.assert_called_once()
+
+
+def test_a_successful_probe_keeps_the_session():
+    session = _session({"result": {"uid": 2}})
+    result = canary.run_once(session, "http://odoo:8069", "acme", "canary", "pw")
+    assert result.success is True
+    session.cookies.clear.assert_not_called()

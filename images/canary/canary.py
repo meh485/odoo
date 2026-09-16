@@ -100,6 +100,21 @@ def probe(session, base_url: str, database: str, login: str, password: str,
         return ProbeResult(False, error=message)
 
 
+def run_once(session, base_url: str, database: str, login: str, password: str) -> ProbeResult:
+    """Probe once, and drop the session if it failed.
+
+    A canary that starts before its database exists can end up holding a session
+    cookie the server will never accept again, and then reports a permanent
+    false outage -- which is exactly what one tenant's canary did, while a fresh
+    session against the same pod authenticated and read a record successfully.
+    Throwing the session away makes the next probe start clean.
+    """
+    result = probe(session, base_url, database, login, password)
+    if not result.success:
+        session.cookies.clear()
+    return result
+
+
 def main() -> int:
     tenant = os.environ["TENANT"]
     base_url = os.environ.get("ODOO_URL", "http://odoo-web:8069")
@@ -116,7 +131,7 @@ def main() -> int:
     CANARY_SUCCESS.labels(tenant=tenant).set(0)
 
     while True:
-        result = probe(session, base_url, database, login, password)
+        result = run_once(session, base_url, database, login, password)
         CANARY_SUCCESS.labels(tenant=tenant).set(1 if result.success else 0)
         CANARY_LOGIN.labels(tenant=tenant).set(result.login_seconds)
         CANARY_READ.labels(tenant=tenant).set(result.read_seconds)
