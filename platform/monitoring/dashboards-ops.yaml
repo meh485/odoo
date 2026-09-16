@@ -1,0 +1,151 @@
+# Operational dashboards: backups/recovery and per-tenant health. Separate
+# ConfigMap from the overview so each can be replaced independently. Loaded by
+# the Grafana sidecar through the grafana_dashboard label.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: grafana-dashboard-odoo-ops
+  namespace: monitoring
+  labels:
+    grafana_dashboard: "1"
+data:
+  odoo-backups.json: |
+    {
+      "title": "Odoo backups and recovery",
+      "uid": "odoo-backups",
+      "schemaVersion": 39,
+      "refresh": "1m",
+      "time": {"from": "now-24h", "to": "now"},
+      "panels": [
+        {
+          "id": 1, "type": "stat", "title": "Hours since last base backup",
+          "datasource": {"type": "prometheus", "uid": "prometheus"},
+          "gridPos": {"h": 6, "w": 6, "x": 0, "y": 0},
+          "targets": [{"refId": "A", "expr": "(time() - cnpg_collector_last_available_backup_timestamp) / 3600", "legendFormat": "{{namespace}}"}],
+          "fieldConfig": {"defaults": {"unit": "h", "mappings": [], "thresholds": {"mode": "absolute", "steps": [{"color": "green", "value": null}, {"color": "red", "value": 26}]}}, "overrides": []}
+        },
+        {
+          "id": 2, "type": "stat", "title": "Last failed backup (0 = never)",
+          "datasource": {"type": "prometheus", "uid": "prometheus"},
+          "gridPos": {"h": 6, "w": 6, "x": 6, "y": 0},
+          "targets": [{"refId": "A", "expr": "cnpg_collector_last_failed_backup_timestamp", "legendFormat": "{{namespace}}"}],
+          "fieldConfig": {"defaults": {"mappings": [], "thresholds": {"mode": "absolute", "steps": [{"color": "green", "value": null}, {"color": "red", "value": 1}]}}, "overrides": []}
+        },
+        {
+          "id": 3, "type": "stat", "title": "Restore drill result",
+          "datasource": {"type": "prometheus", "uid": "prometheus"},
+          "gridPos": {"h": 6, "w": 6, "x": 12, "y": 0},
+          "targets": [{"refId": "A", "expr": "odoo_restore_drill_success", "legendFormat": "{{tenant}}"}],
+          "fieldConfig": {"defaults": {"mappings": [], "thresholds": {"mode": "absolute", "steps": [{"color": "red", "value": null}, {"color": "green", "value": 1}]}}, "overrides": []}
+        },
+        {
+          "id": 4, "type": "stat", "title": "Hours since last restore drill",
+          "datasource": {"type": "prometheus", "uid": "prometheus"},
+          "gridPos": {"h": 6, "w": 6, "x": 18, "y": 0},
+          "targets": [{"refId": "A", "expr": "(time() - odoo_restore_drill_last_run_timestamp_seconds) / 3600", "legendFormat": "{{tenant}}"}],
+          "fieldConfig": {"defaults": {"unit": "h", "mappings": [], "thresholds": {"mode": "absolute", "steps": [{"color": "green", "value": null}, {"color": "red", "value": 192}]}}, "overrides": []}
+        },
+        {
+          "id": 5, "type": "timeseries", "title": "WAL archive status by state",
+          "datasource": {"type": "prometheus", "uid": "prometheus"},
+          "gridPos": {"h": 8, "w": 12, "x": 0, "y": 6},
+          "targets": [{"refId": "A", "expr": "cnpg_collector_pg_wal_archive_status", "legendFormat": "{{namespace}} {{value}}"}],
+          "fieldConfig": {"defaults": {"custom": {"drawStyle": "line", "fillOpacity": 10, "lineWidth": 1, "showPoints": "never"}}, "overrides": []}
+        },
+        {
+          "id": 6, "type": "timeseries", "title": "Seconds since last successful WAL archive",
+          "datasource": {"type": "prometheus", "uid": "prometheus"},
+          "gridPos": {"h": 8, "w": 12, "x": 12, "y": 6},
+          "targets": [{"refId": "A", "expr": "cnpg_pg_stat_archiver_seconds_since_last_archival", "legendFormat": "{{namespace}}"}],
+          "fieldConfig": {"defaults": {"unit": "s", "custom": {"drawStyle": "line", "fillOpacity": 10, "lineWidth": 1, "showPoints": "never"}, "thresholds": {"mode": "absolute", "steps": [{"color": "green", "value": null}, {"color": "red", "value": 300}]}}, "overrides": []}
+        },
+        {
+          "id": 7, "type": "timeseries", "title": "Attachments: rows, filestore, inline",
+          "datasource": {"type": "prometheus", "uid": "prometheus"},
+          "gridPos": {"h": 8, "w": 24, "x": 0, "y": 14},
+          "targets": [
+            {"refId": "A", "expr": "odoo_attachment_total", "legendFormat": "total ({{namespace}})"},
+            {"refId": "B", "expr": "odoo_attachment_filestore", "legendFormat": "filestore ({{namespace}})"},
+            {"refId": "C", "expr": "odoo_attachment_database", "legendFormat": "inline ({{namespace}})"}
+          ],
+          "fieldConfig": {"defaults": {"custom": {"drawStyle": "line", "fillOpacity": 0, "lineWidth": 1, "showPoints": "never"}}, "overrides": []}
+        }
+      ]
+    }
+  odoo-tenant-health.json: |
+    {
+      "title": "Odoo tenant health",
+      "uid": "odoo-tenant-health",
+      "schemaVersion": 39,
+      "refresh": "30s",
+      "time": {"from": "now-6h", "to": "now"},
+      "panels": [
+        {
+          "id": 1, "type": "stat", "title": "Scraped targets up (acme)",
+          "datasource": {"type": "prometheus", "uid": "prometheus"},
+          "gridPos": {"h": 6, "w": 6, "x": 0, "y": 0},
+          "targets": [{"refId": "A", "expr": "count(up{namespace=\"acme\"} == 1)"}],
+          "fieldConfig": {"defaults": {"mappings": [], "thresholds": {"mode": "absolute", "steps": [{"color": "red", "value": null}, {"color": "green", "value": 1}]}}, "overrides": []}
+        },
+        {
+          "id": 2, "type": "stat", "title": "Login canary",
+          "datasource": {"type": "prometheus", "uid": "prometheus"},
+          "gridPos": {"h": 6, "w": 6, "x": 6, "y": 0},
+          "targets": [{"refId": "A", "expr": "odoo_canary_success", "legendFormat": "{{tenant}}"}],
+          "fieldConfig": {"defaults": {"mappings": [], "thresholds": {"mode": "absolute", "steps": [{"color": "red", "value": null}, {"color": "green", "value": 1}]}}, "overrides": []}
+        },
+        {
+          "id": 3, "type": "timeseries", "title": "Canary durations",
+          "datasource": {"type": "prometheus", "uid": "prometheus"},
+          "gridPos": {"h": 6, "w": 12, "x": 12, "y": 0},
+          "targets": [
+            {"refId": "A", "expr": "odoo_canary_login_duration_seconds", "legendFormat": "login ({{tenant}})"},
+            {"refId": "B", "expr": "odoo_canary_read_duration_seconds", "legendFormat": "read ({{tenant}})"}
+          ],
+          "fieldConfig": {"defaults": {"unit": "s", "custom": {"drawStyle": "line", "fillOpacity": 10, "lineWidth": 1, "showPoints": "never"}}, "overrides": []}
+        },
+        {
+          "id": 4, "type": "timeseries", "title": "Postgres backends and replication lag",
+          "datasource": {"type": "prometheus", "uid": "prometheus"},
+          "gridPos": {"h": 8, "w": 12, "x": 0, "y": 6},
+          "targets": [
+            {"refId": "A", "expr": "cnpg_backends_total", "legendFormat": "backends ({{namespace}})"},
+            {"refId": "B", "expr": "cnpg_pg_replication_lag", "legendFormat": "replication lag ({{namespace}})"}
+          ],
+          "fieldConfig": {"defaults": {"custom": {"drawStyle": "line", "fillOpacity": 10, "lineWidth": 1, "showPoints": "never"}}, "overrides": []}
+        },
+        {
+          "id": 5, "type": "timeseries", "title": "Database size",
+          "datasource": {"type": "prometheus", "uid": "prometheus"},
+          "gridPos": {"h": 8, "w": 12, "x": 12, "y": 6},
+          "targets": [{"refId": "A", "expr": "cnpg_pg_database_size_bytes", "legendFormat": "{{namespace}}/{{datname}}"}],
+          "fieldConfig": {"defaults": {"unit": "bytes", "custom": {"drawStyle": "line", "fillOpacity": 10, "lineWidth": 1, "showPoints": "never"}}, "overrides": []}
+        },
+        {
+          "id": 6, "type": "timeseries", "title": "Cache hit ratio",
+          "datasource": {"type": "prometheus", "uid": "prometheus"},
+          "gridPos": {"h": 8, "w": 12, "x": 0, "y": 14},
+          "targets": [{"refId": "A", "expr": "sum(rate(cnpg_pg_stat_database_blks_hit[5m])) by (namespace) / clamp_min(sum(rate(cnpg_pg_stat_database_blks_hit[5m])) by (namespace) + sum(rate(cnpg_pg_stat_database_blks_read[5m])) by (namespace), 1)", "legendFormat": "{{namespace}}"}],
+          "fieldConfig": {"defaults": {"unit": "percentunit", "min": 0, "max": 1, "custom": {"drawStyle": "line", "fillOpacity": 10, "lineWidth": 1, "showPoints": "never"}}, "overrides": []}
+        },
+        {
+          "id": 7, "type": "timeseries", "title": "Container restarts (per 5m)",
+          "datasource": {"type": "prometheus", "uid": "prometheus"},
+          "gridPos": {"h": 8, "w": 12, "x": 12, "y": 14},
+          "targets": [{"refId": "A", "expr": "sum(rate(kube_pod_container_status_restarts_total{namespace=\"acme\"}[5m])) by (pod)", "legendFormat": "{{pod}}"}],
+          "fieldConfig": {"defaults": {"custom": {"drawStyle": "line", "fillOpacity": 10, "lineWidth": 1, "showPoints": "never"}}, "overrides": []}
+        },
+        {
+          "id": 8, "type": "timeseries", "title": "Silent-failure signals",
+          "datasource": {"type": "prometheus", "uid": "prometheus"},
+          "gridPos": {"h": 8, "w": 24, "x": 0, "y": 22},
+          "targets": [
+            {"refId": "A", "expr": "odoo_cron_overdue_seconds", "legendFormat": "cron overdue ({{namespace}})"},
+            {"refId": "B", "expr": "odoo_mail_outgoing_age_seconds", "legendFormat": "oldest queued mail ({{namespace}})"},
+            {"refId": "C", "expr": "odoo_mail_queue_depth", "legendFormat": "mail queue ({{namespace}})"},
+            {"refId": "D", "expr": "pg_blocked_query_age_seconds", "legendFormat": "blocked query ({{namespace}})"}
+          ],
+          "fieldConfig": {"defaults": {"unit": "s", "custom": {"drawStyle": "line", "fillOpacity": 10, "lineWidth": 1, "showPoints": "never"}}, "overrides": []}
+        }
+      ]
+    }
