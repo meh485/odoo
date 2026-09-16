@@ -128,10 +128,13 @@ authenticating as `admin` with the password `admin` fails, which turns the
 guarantee into something the pipeline checks rather than something a runbook
 claims.
 
-**Non-root, per-workload RBAC.** One ServiceAccount per workload, no wildcard
-verbs, and no cluster-scoped grants for tenant workloads. The restore drill
-runs as a namespaced `Role` limited to the CloudNativePG resources it creates
-and deletes.
+**Almost nothing has an identity.** Only the restore drill has a
+ServiceAccount, because it is the only workload that calls the API server: it is
+the only pod with `automountServiceAccountToken: true`, and its Role is scoped
+to this namespace, to `clusters` in `postgresql.cnpg.io`, and to reading exactly
+one named Secret. Every other workload runs with
+`automountServiceAccountToken: false` and has no token to steal. No wildcard
+verbs and no cluster-scoped grants appear anywhere in the tenant.
 
 **ResourceQuota and LimitRange per namespace**, so one tenant cannot starve a
 node, and every workload declares requests and limits.
@@ -166,9 +169,11 @@ failure.
 
 A scheduled `CronJob` creates a throwaway CloudNativePG `Cluster` with
 `bootstrap.recovery` pointing at the latest backup, waits for it to become
-ready, asserts against the restored data — row counts on `res_users`, module
-state in `ir_module_module`, attachment counts — then deletes the cluster and
-pushes the result to the pushgateway:
+ready, asserts that the restored database holds at least one row in `res_users`
+and that no module in `ir_module_module` is stuck in a transitional state
+(`to install`, `to upgrade`, `to remove` — `uninstallable` is a stable state
+and is deliberately not counted), then deletes the cluster and pushes the
+result to the pushgateway:
 
 - `odoo_restore_drill_success` (1 or 0)
 - `odoo_restore_drill_duration_seconds`
@@ -186,22 +191,33 @@ This is the core of the submission. Each row is a real Odoo production failure
 in which the service keeps answering requests while something important has
 stopped.
 
-| Failure | Detection | Alert |
-|---|---|---|
-| Backups stopped | `time() - cnpg_collector_last_available_backup_timestamp` | `OdooBackupStale` |
-| WAL archiving stalled or failing | archiver lag and failure counters | `OdooWalArchivingStalled`, `OdooWalArchivingFailing` |
-| Backups exist but are unrestorable | restore drill assertions | `OdooRestoreDrillFailed`, `OdooRestoreDrillStale` |
-| Odoo answers HTTP but login is broken | canary JSON-RPC login and record read | `OdooCanaryFailed`, `OdooCanaryStale` |
-| `ir_cron` stalls — invoices and mail stop, nothing errors | `ir_cron.nextcall` lag via sql_exporter | `OdooCronStalled` |
-| Cron runs but its queue never drains | oldest queued row in `ir_cron` | `OdooMailQueueStalled` (mail queue age) |
-| Outbound mail silently queuing | age of the oldest unsent `mail_mail` | `OdooMailBacklog` |
-| Filestore drifts from the database | attachment rows vs filestore object count | `OdooAttachmentDrift` |
-| Lock contention stalls transactions | oldest blocked query in `pg_stat_activity` | `OdooLockContention` |
+| Failure | Expression, per tenant | Alert | Severity |
+|---|---|---|---|
+| Backups stopped | `time() - cnpg_collector_last_available_backup_timestamp > 93600` | `OdooBackupStale` | critical |
+| WAL archiving stalled | `cnpg_pg_stat_archiver_seconds_since_last_archival > 300` | `OdooWalArchivingStalled` | warning |
+| WAL archiving failing | `increase(cnpg_pg_stat_archiver_failed_count[1h]) > 0` | `OdooWalArchiveFailing` | warning |
+| Backups exist but will not restore | drill result, and the age of that result | `OdooRestoreDrillFailed`, `OdooRestoreDrillStale` | critical |
+| Odoo answers HTTP but login is broken | `odoo_canary_success == 0`, and how long since the probe ran | `OdooCanaryFailed`, `OdooCanaryStale` | critical, warning |
+| `ir_cron` stalls — invoices and mail stop, nothing errors | `odoo_cron_overdue_seconds > 7200` | `OdooCronStalled` | critical |
+| Outbound mail queuing silently | `odoo_mail_outgoing_age_seconds > 1800` | `OdooMailQueueStalled` | warning |
+| Mail queue growing without draining | `odoo_mail_queue_depth > 100` | `OdooMailBacklog` | warning |
+| Filestore drifts from the database | `abs(filestore - (total - database)) > 10` | `OdooAttachmentDrift` | warning |
+| Lock contention stalls transactions | `pg_blocked_query_age_seconds > 300` | `OdooLockContention` | warning |
+
+Every rule carries a `for:` of five minutes to an hour, so a single bad scrape
+does not page anyone, and every rule is scoped to one tenant, so one customer's
+incident does not produce alerts for the other 499.
 
 The Odoo-domain signals are exported by a per-tenant `sql_exporter` Deployment
 whose collector definitions live in the chart, so a new tenant is monitored the
-moment its namespace exists. Alerts split symptom from cause: a customer cannot
-log in is a page, capacity pressure is a ticket.
+moment its namespace exists. Severity carries the split: five rules are critical
+— a stale backup, a failed canary, a stalled `ir_cron`, and a failed or stale
+restore drill — and the rest are warnings. Alertmanager runs with the chart's
+default inhibition, so a critical alert suppresses its lower-severity equals in
+the same namespace with the same alert name, which is what stops one incident
+producing three notifications. No external receiver is configured: alerts are
+read in the Alertmanager UI and in Prometheus, and the receiver is null on
+purpose.
 
 ### Why the canary authenticates
 
@@ -231,21 +247,33 @@ database and filestore), and **tenant health** (scrape targets up, canary
 result and durations, Postgres backends and replication lag, database size,
 cache hit ratio, restart rate, and the silent-failure signals). Every query in
 them was checked against live Prometheus before the panel was written, so no
-panel is decorative.
+panel is decorative. The tenant-health dashboard takes its tenant from a
+template variable discovered from the canary targets rather than hardcoding a
+name, so the same dashboard serves one customer or all of them.
 
 Alertmanager runs in-cluster. No external receiver is configured here; in
 production these routes to whatever pages the on-call engineer.
 
-The monitoring stack is trimmed for the demo: Grafana's bundled dashboards are
-disabled in favour of the three tenant-focused ones, and only the components
-needed to scrape tenants, evaluate rules, and display results are installed.
-What production would add is listed in the limits.
+The monitoring stack is trimmed for the demo: node-exporter is off because it
+needs host access that `restricted` forbids, Grafana's bundled dashboards are
+off in favour of the tenant-focused ones, and the etcd, scheduler,
+controller-manager and kube-proxy monitors are off because kubeadm binds those
+endpoints to 127.0.0.1 and no policy or scrape config can reach them. Under a
+managed control plane they would be enabled. kube-state-metrics is kept,
+because the restart panel on the tenant-health dashboard reads it.
+
+Nothing this stack scrapes is permanently red: `make e2e` asserts that no `up`
+is zero anywhere, not merely that the tenants are up. That assertion earned its
+place by catching twelve cluster-component targets that the monitoring
+namespace's own network policies were silently blocking — which is precisely
+the sort of noise that teaches an operator to ignore alerts.
 
 ## Scaling to 500 tenants
 
 A tenant is a values file; the ApplicationSet renders one `Application` per
-entry. Per-tenant resource *requests*, in the production shape (two Odoo web
-replicas, three Postgres instances, two poolers):
+entry, from a git files generator, so a customer is a file and nothing else.
+Per-tenant resource *requests*, in the production shape (two Odoo web replicas,
+three Postgres instances, two poolers):
 
 | Component | Requests each | Count | Total |
 |---|---|---|---|
@@ -256,6 +284,10 @@ replicas, three Postgres instances, two poolers):
 | Canary | 10m / 64Mi | 1 | 10m / 64Mi |
 | sql_exporter | 10m / 32Mi | 1 | 10m / 32Mi |
 | **Per tenant** | | | **≈1.6 vCPU / ≈6.1Gi** |
+
+The chart's local defaults are deliberately smaller — one Odoo replica, one
+Postgres instance, one pooler — and `tenants/*.yaml` set them; the counts above
+are the production shape, which is what the arithmetic needs to be about.
 
 Multiplied by 500: **≈785 vCPU and ≈3.0 TiB of memory requests**. On
 16 vCPU / 64 GiB nodes, holding back 30% for system and burst, that is about
@@ -313,9 +345,16 @@ Everything below is a real gap, not a hypothetical:
   Vault by ESO, which is the contract the secret-file mounts already assume.
 - **TLS is self-signed.** The Gateway terminates HTTPS; cert-manager is not
   wired, so certificates are not automatically issued or renewed.
-- **The restore-drill Role could be narrower** using `resourceNames`, and at
-  500 tenants the drill schedules would need staggering so that every tenant
-  does not restore in the same hour.
+- **The restore drill proves the database, not the filestore.** It asserts that
+  users came back and that no module is half-upgraded; it does not restore a
+  sample of restic objects and compare them with the attachment rows. Given
+  that this design argues at length that a database-only restore is broken, the
+  drill should be asserting the other half, and that is the next thing to add.
+- **The restore-drill Role could be narrower for `clusters`.** The Secret read
+  is already limited with `resourceNames`; the cluster rule cannot be, because
+  the scratch cluster's name is generated per run. At 500 tenants the drill
+  schedules would also need staggering so that every tenant does not restore in
+  the same hour.
 - **No multi-region or active-active.** Single region with tested recovery, as
   the brief allows.
 - **ArgoCD is committed, not running here.** `helm upgrade --install`
