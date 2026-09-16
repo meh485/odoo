@@ -39,3 +39,7 @@ lint: ## Lint the chart
 test: ## Run chart unit tests and shell tests
 	@python3 -m pytest tests/ -q
 	@bats tests/
+
+.PHONY: e2e
+e2e: ## Run the integration tests against the live cluster
+	@python3 -m pytest tests/integration -m integration -q
