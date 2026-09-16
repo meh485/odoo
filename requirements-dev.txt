@@ -1,2 +1,6 @@
 pytest>=8,<10
 PyYAML>=6,<7
+# tests/test_canary.py imports images/canary/canary.py directly, so running the
+# suite needs the probe's own dependencies. Referencing the canary's file keeps
+# one source of truth for those versions instead of repeating them here.
+-r images/canary/requirements.txt
