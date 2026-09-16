@@ -378,10 +378,10 @@ Everything below is a real gap, not a hypothetical:
 - **Loki is specified but not deployed.** Log aggregation is the next
   component to add; the manifests are not committed because an unrun manifest
   is a claim rather than a capability.
-- **Digest-pinned images, Trivy, and gitleaks are not in CI.** Images are
-  pinned by tag today; `ci.yml` runs shellcheck, bats, `helm lint`, a full
-  render, and the chart unit tests. Supply-chain scanning is the obvious next
-  CI step.
+- **Images are pinned by tag, not by digest.** `ci.yml` runs gitleaks across the
+  full history and Trivy across the filesystem (HIGH and CRITICAL, unfixed
+  ignored); what remains is pinning every image by digest so a tag cannot be
+  repointed upstream underneath a deployment.
 - **No predictive disk alert.** The brief asks for projected time-to-full
   rather than a static threshold; today there is a volume-usage alert, not a
   `predict_linear` one.

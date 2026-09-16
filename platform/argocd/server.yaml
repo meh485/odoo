@@ -1,0 +1,39 @@
+# ArgoCD's UI behind the platform gateway.
+#
+# The gateway terminates TLS, so the API server must not terminate it again:
+# `server.insecure` makes it serve plain HTTP on 8080, which is what the route
+# in httproute.yaml targets. This is ArgoCD's documented arrangement for running
+# behind a proxy that does TLS.
+#
+# The gateway's certificate already covers *.odoo.local, so argocd.odoo.local
+# needs no certificate of its own -- the same arrangement Grafana has.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: argocd-cmd-params-cm
+  namespace: argocd
+  labels:
+    app.kubernetes.io/part-of: argocd
+data:
+  server.insecure: "true"
+---
+# ArgoCD's install manifest ships a permissive policy for its server, but that
+# file is generated upstream and could change under us. Stating the one flow
+# that should reach it keeps the intent in this repository.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: argocd-server-from-gateway
+  namespace: argocd
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: argocd-server
+  policyTypes: [Ingress]
+  ingress:
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: envoy-gateway-system
+      ports:
+        - { protocol: TCP, port: 8080 }

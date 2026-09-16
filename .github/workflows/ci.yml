@@ -41,3 +41,30 @@ jobs:
         run: pip install -r requirements-dev.txt
       - name: chart unit tests
         run: python3 -m pytest tests/ -q
+
+  security:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # gitleaks scans commit history, so a shallow clone would miss the
+          # commits where a credential would most likely be introduced.
+          fetch-depth: 0
+      - name: gitleaks
+        run: |
+          # The action for this wants a licence on private repositories, and the
+          # scanner itself does not, so it is fetched directly and pinned.
+          curl -sSfL https://github.com/gitleaks/gitleaks/releases/download/v8.30.1/gitleaks_8.30.1_linux_x64.tar.gz \
+            | tar -xz -C "$RUNNER_TEMP" gitleaks
+          "$RUNNER_TEMP/gitleaks" git --redact --no-banner --exit-code 1 .
+      - name: trivy
+        uses: aquasecurity/trivy-action@v0.36.0
+        with:
+          scan-type: fs
+          scan-ref: .
+          scanners: vuln,misconfig
+          severity: HIGH,CRITICAL
+          # Unfixed findings are not actionable here, and the scan only stays
+          # worth reading if it is quiet when there is nothing to fix.
+          ignore-unfixed: true
+          exit-code: "1"

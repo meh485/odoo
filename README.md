@@ -143,4 +143,4 @@ and recovery, and tenant health.
 The gaps are listed in
 [DESIGN.md](DESIGN.md#limits-and-what-i-would-do-next) rather than hidden:
 Loki is specified but not deployed, images are pinned by tag rather than
-digest, Trivy and gitleaks are not wired into CI, and TLS is self-signed.
+digest, and TLS is self-signed.

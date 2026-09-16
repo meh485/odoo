@@ -1,0 +1,28 @@
+# The ArgoCD UI at argocd.odoo.local:8443, reached through the platform's
+# gateway exactly like Grafana: no NodePort for the UI, and no port-forward.
+#
+# The gateway's certificate covers *.odoo.local, so there is nothing to issue.
+# Add `argocd.odoo.local` to /etc/hosts alongside the tenant hostnames.
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: argocd
+  namespace: argocd
+spec:
+  parentRefs:
+    - name: odoo-edge
+      namespace: envoy-gateway-system
+      sectionName: https
+  hostnames:
+    - argocd.odoo.local
+  rules:
+    - matches:
+        - path:
+            type: PathPrefix
+            value: /
+      backendRefs:
+        # The Service's http port (80), not the container's 8080: a backendRef
+        # names a Service port. With server.insecure the targetPort behind it
+        # speaks plain HTTP, which is what the gateway forwards.
+        - name: argocd-server
+          port: 80
