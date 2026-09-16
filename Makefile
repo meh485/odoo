@@ -12,7 +12,7 @@ help: ## Show available targets
 
 .PHONY: cluster
 cluster: ## Create the local kind cluster
-	@kind create cluster --config .local/cluster/kind.yaml --image kindest/node:v1.34.0 --wait 5m
+	@kind create cluster --config cluster/kind.yaml --image kindest/node:v1.34.0 --wait 5m
 
 .PHONY: platform
 platform: ## Install operators and platform-wide resources

@@ -1,0 +1,27 @@
+# The development cluster. Three nodes because the platform plus a tenant does
+# not fit on one, and because scheduling behaviour on a single node hides
+# mistakes that a second and third node expose.
+#
+# The host port mappings are what the Gateway's NodePort targets: kind has no
+# load balancer, so Envoy is reached on 8443 from the host. In a real cluster
+# both the NodePort and the mapping disappear into the provider's LoadBalancer.
+kind: Cluster
+apiVersion: kind.x-k8s.io/v1alpha4
+name: odoo
+nodes:
+  - role: control-plane
+    kubeadmConfigPatches:
+      - |
+        kind: InitConfiguration
+        nodeRegistration:
+          kubeletExtraArgs:
+            node-labels: "ingress-ready=true"
+    extraPortMappings:
+      - containerPort: 30080
+        hostPort: 8080
+        protocol: TCP
+      - containerPort: 30443
+        hostPort: 8443
+        protocol: TCP
+  - role: worker
+  - role: worker
