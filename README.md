@@ -41,10 +41,13 @@ commit, and why no tenant namespace has to exist yet — the store needs the
 values, and ArgoCD creates the namespace along with everything else.
 
 Locally the store is a Kubernetes namespace (`odoo-credentials`) that `make seed`
-fills, standing in for Vault. In production the `ClusterSecretStore` points at
-Vault and `make seed` is not used at all; the chart and the tenant's values file
-are unchanged either way. `make seed` is idempotent: it never overwrites a
-credential that exists, so it will not rotate anything.
+fills, standing in for Vault. Each tenant gets its own `SecretStore` pointing at
+it, with a reader whose Role can read that tenant's one Secret and nothing else
+in the namespace. In production `credentials.externalSecrets.store` and
+`storeKind` name the Vault-backed store instead and the reader is turned off;
+nothing else in the chart or the tenant's values file changes. `make seed` is
+idempotent: it never overwrites a credential that exists, so it will not rotate
+anything.
 
 ArgoCD is at `kubectl -n argocd port-forward svc/argocd-server 8080:443`, logged
 in as `admin` with the password from the `argocd-initial-admin-secret`.

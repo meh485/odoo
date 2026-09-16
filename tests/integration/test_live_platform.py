@@ -110,14 +110,35 @@ def test_credentials_are_materialised_by_the_operator(tenants):
         for secret in secrets:
             name = secret["metadata"]["name"]
             store = secret["spec"]["secretStoreRef"]
-            assert store["kind"] == "ClusterSecretStore", (
-                f"{tenant}/{name} reads from a namespaced store instead"
+            assert store["kind"] == "SecretStore", (
+                f"{tenant}/{name} does not read from its own namespaced store"
             )
             conditions = secret.get("status", {}).get("conditions", [])
             synced = [
                 c for c in conditions if c.get("type") == "Ready" and c.get("status") == "True"
             ]
             assert synced, f"{tenant}/{name} is not synced: {conditions}"
+
+
+def test_a_tenant_reader_can_read_only_its_own_secret(tenants):
+    """The per-tenant store is only safe with a per-tenant reader.
+
+    The credentials namespace holds every tenant's Secret, so this Role is the
+    boundary that keeps one tenant out of another's: `get`, on one named Secret.
+    A reader without resourceNames is usable by whichever namespace is allowed
+    to create an ExternalSecret naming it.
+    """
+    for tenant in tenants:
+        role = kubectl_json(
+            "get", "role", f"{tenant}-credential-reader", "-n", "odoo-credentials"
+        )
+        secret_rules = [r for r in role.get("rules", []) if "secrets" in r.get("resources", [])]
+        assert secret_rules, f"{tenant}'s reader has no rule for Secret access"
+        for rule in secret_rules:
+            assert rule.get("resourceNames") == [tenant], (
+                f"{tenant}'s reader is not scoped to its own Secret: {rule}"
+            )
+            assert rule.get("verbs") == ["get"], f"{tenant}'s reader is not read-only"
 
 
 def test_expected_alert_rules_are_loaded():

@@ -203,10 +203,20 @@ when somebody opens an old invoice.
   generates none: it *declares* an `ExternalSecret` per credential and the
   operator materialises the Secret into the tenant namespace. Locally the store
   is a Kubernetes namespace seeded by `make seed`, standing in for Vault; in
-  production the `ClusterSecretStore` points at Vault and the seeding script is
-  not used. Because the ExternalSecret lives in the tenant namespace it is
-  applied in the same sync as the namespace itself, which is what removes the
-  ordering problem entirely — no credential has to exist before the tenant does.
+  production the store is Vault and the seeding script is not used. Because the
+  ExternalSecret lives in the tenant namespace it is applied in the same sync as
+  the namespace itself, which is what removes the ordering problem entirely — no
+  credential has to exist before the tenant does.
+- **One store, one reader, per tenant.** The store is namespaced rather than a
+  cluster-scoped `ClusterSecretStore`, and each tenant's reader is scoped with
+  `resourceNames` to its own Secret. That is deliberate. A `ClusterSecretStore`
+  is readable from any namespace allowed to create an `ExternalSecret`, so a
+  single reader in the credentials namespace would need `get` across every
+  tenant's Secret: one mistake in one namespace, and every customer's credentials
+  are exposed at once. The scoped Role reduces a tenant's reach to its own
+  credential, which its workloads already mount, and the reader's
+  ServiceAccount lives in the tenant's namespace so its token is never an
+  identity the credentials namespace itself trusts.
 
 Backup age is exported by the operator
 (`cnpg_collector_last_available_backup_timestamp`) and alerted on: a backup that

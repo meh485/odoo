@@ -8,10 +8,22 @@ credentials:
     # This is the production shape: the store is Vault there and a platform
     # namespace here, and nothing else about the tenant changes.
     enabled: false
-    # The ClusterSecretStore to read from. Required when enabled.
+    # The store to read from, and its kind. Empty means the per-tenant
+    # SecretStore this chart creates and scopes to this tenant alone. Set both
+    # when the store lives elsewhere -- the Vault-backed one in production --
+    # and turn the reader below off with them.
     store: ""
+    storeKind: SecretStore
+    # The reader this chart creates for its own per-tenant store: a
+    # ServiceAccount in the tenant's namespace, and a Role in the shared
+    # credentials namespace granting `get` on exactly one named Secret. That
+    # name, taken from remoteKey below, is all this tenant can read there.
+    reader:
+      enabled: true
+      namespace: odoo-credentials
     # The key the tenant's credentials live under in the store. Defaults to the
-    # tenant name, which is what the seeding script writes.
+    # tenant name, which is what the seeding script writes, and it is also the
+    # Secret the reader above is scoped to.
     remoteKey: ""
 
 tenant:

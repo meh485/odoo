@@ -42,12 +42,13 @@ spec:
             - name: argocd.enabled
               value: "true"
             # Credentials are declared as ExternalSecrets and materialised by
-            # the operator, so no Secret has to exist before the first sync.
-            # Local store; production points at the Vault-backed one.
+            # the operator, so no Secret has to exist before the first sync. The
+            # chart creates each tenant's own SecretStore, and a reader scoped to
+            # that tenant's one Secret, so no shared store is named here;
+            # production overrides store and storeKind to point at the
+            # Vault-backed one instead.
             - name: credentials.externalSecrets.enabled
               value: "true"
-            - name: credentials.externalSecrets.store
-              value: tenant-credentials
       destination:
         server: https://kubernetes.default.svc
         namespace: "{{.tenant.name}}"

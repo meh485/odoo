@@ -44,9 +44,9 @@ kubectl apply --server-side -n argocd \
   -f "https://raw.githubusercontent.com/argoproj/argo-cd/${ARGOCD_VERSION}/manifests/install.yaml"
 
 # External Secrets, which materialises each tenant's credentials from the store.
-# Installed before the platform manifests are applied, because the
-# ClusterSecretStore in platform/credentials is one of its custom resources and
-# `set -e` would abort the install without the CRDs.
+# Installed before the platform manifests are applied: the tenants' SecretStores
+# and ExternalSecrets are its custom resources, and `set -e` would abort the
+# install without the CRDs.
 helm repo add external-secrets https://charts.external-secrets.io >/dev/null
 helm repo update >/dev/null
 helm upgrade --install external-secrets external-secrets/external-secrets \
