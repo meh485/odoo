@@ -5,6 +5,10 @@ kind: Deployment
 metadata:
   name: {{ $tenant }}-canary
   namespace: {{ $tenant }}
+  annotations:
+    # Wave 5. The probe would only report a false outage if it started before
+    # the schema existed.
+    argocd.argoproj.io/sync-wave: "5"
   labels:
     {{- include "odoo.labels" . | nindent 4 }}
     app.kubernetes.io/component: canary

@@ -14,17 +14,25 @@ metadata:
   labels:
     {{- include "odoo.labels" . | nindent 4 }}
   annotations:
+    {{- if .Values.argocd.enabled }}
+    # Ordered as an ArgoCD Sync hook: it runs in wave 3, after the database is
+    # applied and before the workloads in wave 5. PostSync would deadlock, since
+    # it waits for every resource to be healthy and the web Deployment cannot be
+    # healthy until this job has run.
+    argocd.argoproj.io/hook: Sync
+    argocd.argoproj.io/hook-delete-policy: BeforeHookCreation
+    argocd.argoproj.io/sync-wave: "3"
+    {{- else }}
     helm.sh/hook: post-install,post-upgrade
     helm.sh/hook-weight: "0"
     helm.sh/hook-delete-policy: before-hook-creation
-    # ArgoCD does not execute Helm hooks, so without these the database is
-    # never initialised: a tenant synced from git serves 500s and its canary
-    # reports failure, which is exactly how this was found.
-    argocd.argoproj.io/hook: PostSync
-    argocd.argoproj.io/hook-delete-policy: BeforeHookCreation
-    argocd.argoproj.io/sync-wave: "1"
+    {{- end }}
 spec:
-  backoffLimit: 3
+  # High on purpose: on a fresh install the database is still starting when this
+  # job first runs, so it has to ride that out rather than give up after three
+  # attempts. The alternative is a sync-wave gate on a CloudNativePG Cluster,
+  # which depends on ArgoCD knowing how to assess that custom resource.
+  backoffLimit: 20
   # Leave a completed job visible for a while; a silently vanished init job is
   # hard to investigate after the fact.
   ttlSecondsAfterFinished: 3600

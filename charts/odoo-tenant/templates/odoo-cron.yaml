@@ -7,6 +7,9 @@ kind: Deployment
 metadata:
   name: {{ $tenant }}-cron
   namespace: {{ $tenant }}
+  annotations:
+    # Wave 5, with the web deployment and for the same reason.
+    argocd.argoproj.io/sync-wave: "5"
   labels:
     {{- include "odoo.labels" . | nindent 4 }}
     app.kubernetes.io/component: cron

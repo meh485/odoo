@@ -7,6 +7,10 @@ kind: Pooler
 metadata:
   name: {{ $tenant }}-pooler
   namespace: {{ $tenant }}
+  annotations:
+    # Wave 2, after its Cluster. The schema init job connects through the
+    # pooler, so the pooler has to exist before the job at wave 3 runs.
+    argocd.argoproj.io/sync-wave: "2"
   labels:
     {{- include "odoo.labels" . | nindent 4 }}
 spec:

@@ -75,16 +75,19 @@ metadata:
   labels:
     {{- include "odoo.labels" . | nindent 4 }}
   annotations:
+    {{- if .Values.argocd.enabled }}
+    # Wave 4: after the schema init job at wave 3, and still before the
+    # workloads. See the init job for why this is not a PostSync hook.
+    argocd.argoproj.io/hook: Sync
+    argocd.argoproj.io/hook-delete-policy: BeforeHookCreation
+    argocd.argoproj.io/sync-wave: "4"
+    {{- else }}
     helm.sh/hook: post-install,post-upgrade
     # Weight 1: after the schema init job at weight 0. Setting a password on a
     # database with no res_users table fails.
     helm.sh/hook-weight: "1"
     helm.sh/hook-delete-policy: before-hook-creation
-    # ArgoCD's equivalents, including the same ordering: the sync-wave runs
-    # after the init job's. ArgoCD ignores helm.sh/hook entirely.
-    argocd.argoproj.io/hook: PostSync
-    argocd.argoproj.io/hook-delete-policy: BeforeHookCreation
-    argocd.argoproj.io/sync-wave: "2"
+    {{- end }}
 spec:
   backoffLimit: 3
   ttlSecondsAfterFinished: 3600

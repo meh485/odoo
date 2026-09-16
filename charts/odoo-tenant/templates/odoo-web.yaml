@@ -4,6 +4,11 @@ kind: Deployment
 metadata:
   name: {{ $tenant }}-web
   namespace: {{ $tenant }}
+  annotations:
+    # Wave 5: last, once the schema exists and the passwords are set. In an
+    # earlier wave ArgoCD would wait for this Deployment to be healthy before
+    # the job that makes it healthy could run.
+    argocd.argoproj.io/sync-wave: "5"
   labels:
     {{- include "odoo.labels" . | nindent 4 }}
     app.kubernetes.io/component: web

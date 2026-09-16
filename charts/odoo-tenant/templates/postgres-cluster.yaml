@@ -4,6 +4,10 @@ kind: Cluster
 metadata:
   name: {{ $tenant }}-db
   namespace: {{ $tenant }}
+  annotations:
+    # Wave 1: applied before anything connects to it. Harmless under Helm, which
+    # ignores these annotations.
+    argocd.argoproj.io/sync-wave: "1"
   labels:
     {{- include "odoo.labels" . | nindent 4 }}
 spec:

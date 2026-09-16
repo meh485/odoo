@@ -25,6 +25,15 @@ def _slug(url: str) -> str:
     return slug.removesuffix(".git")
 
 
+def test_the_applicationset_enables_argocd_ordering() -> None:
+    # Without this the one-time Jobs render as Helm hooks, ArgoCD maps those to
+    # PostSync, and the sync waits for a web Deployment that cannot be healthy
+    # until the jobs have run.
+    helm = appset()["spec"]["template"]["spec"]["source"]["helm"]
+    parameters = {p["name"]: p["value"] for p in helm.get("parameters", [])}
+    assert parameters.get("argocd.enabled") == "true"
+
+
 def test_the_generator_uses_go_templates() -> None:
     # Without goTemplate, the controller does not substitute {{.tenant.name}}:
     # it tries to create an Application whose name is the literal placeholder,

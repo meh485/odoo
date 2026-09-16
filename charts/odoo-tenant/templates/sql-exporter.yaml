@@ -114,6 +114,10 @@ kind: Deployment
 metadata:
   name: {{ $tenant }}-sql-exporter
   namespace: {{ $tenant }}
+  annotations:
+    # Wave 5: it queries tables that do not exist until the schema init job has
+    # run, and a failing exporter in an earlier wave would stall the sync.
+    argocd.argoproj.io/sync-wave: "5"
   labels:
     {{- include "odoo.labels" . | nindent 4 }}
     app.kubernetes.io/component: sql-exporter

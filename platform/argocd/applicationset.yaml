@@ -39,6 +39,12 @@ spec:
         helm:
           valueFiles:
             - "../../tenants/{{.tenant.name}}.yaml"
+          parameters:
+            # The one-time Jobs have to be ArgoCD-ordered resources rather than
+            # Helm hooks; see the comment on argocd.enabled in the chart's
+            # values for why the two cannot be the same object.
+            - name: argocd.enabled
+              value: "true"
       destination:
         server: https://kubernetes.default.svc
         namespace: "{{.tenant.name}}"

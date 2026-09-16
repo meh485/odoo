@@ -1,7 +1,5 @@
-import pathlib
-
 import pytest
-from conftest import by_kind, one
+from conftest import by_kind, helm_template, one
 
 
 def test_a_users_job_exists(manifests):
@@ -9,15 +7,43 @@ def test_a_users_job_exists(manifests):
     assert job["spec"]["template"]["spec"]["restartPolicy"] == "Never"
 
 
-def test_the_one_time_jobs_also_run_under_argocd():
-    # ArgoCD ignores helm.sh/hook, so a tenant synced from git would never
-    # initialise its database. Both jobs carry ArgoCD's own hook annotations,
-    # and their sync-waves keep init ahead of the password update.
-    for path, wave in (("charts/odoo-tenant/templates/odoo-init-job.yaml", "1"),
-                       ("charts/odoo-tenant/templates/odoo-users-job.yaml", "2")):
-        text = (pathlib.Path(__file__).resolve().parents[1] / path).read_text()
-        assert "argocd.argoproj.io/hook: PostSync" in text, f"{path} would not run under ArgoCD"
-        assert f'argocd.argoproj.io/sync-wave: "{wave}"' in text
+def test_the_one_time_jobs_are_helm_hooks_by_default(manifests):
+    for name in ("odoo-init", "odoo-users"):
+        annotations = one(manifests, "Job", name)["metadata"]["annotations"]
+        assert "post-install" in annotations["helm.sh/hook"]
+        assert "argocd.argoproj.io/hook" not in annotations
+
+
+def test_the_one_time_jobs_are_argocd_ordered_resources_when_asked():
+    # ArgoCD maps helm.sh/hook post-install to PostSync, which runs only after
+    # every other resource is healthy -- and the web Deployment cannot be
+    # healthy until these jobs have run. ArgoCD mode therefore swaps the Helm
+    # annotations for ArgoCD's own, keeping the ordering with sync-waves.
+    manifests = helm_template({"argocd": {"enabled": True}})
+    waves = {}
+    for name in ("odoo-init", "odoo-users"):
+        annotations = one(manifests, "Job", name)["metadata"]["annotations"]
+        assert annotations["argocd.argoproj.io/hook"] == "Sync"
+        assert "helm.sh/hook" not in annotations, (
+            "a Helm hook still maps to PostSync under ArgoCD"
+        )
+        waves[name] = int(annotations["argocd.argoproj.io/sync-wave"])
+    assert waves["odoo-init"] < waves["odoo-users"]
+
+
+def test_the_sync_waves_order_the_bootstrap():
+    manifests = helm_template({"argocd": {"enabled": True}})
+
+    def wave(kind: str, contains: str = "") -> int:
+        annotations = one(manifests, kind, contains)["metadata"].get("annotations", {})
+        return int(annotations.get("argocd.argoproj.io/sync-wave", 0))
+
+    assert wave("Cluster") < wave("Pooler"), "the pooler needs its cluster first"
+    assert wave("Pooler") <= wave("Job", "odoo-init"), "init connects through the pooler"
+    assert wave("Job", "odoo-init") < wave("Job", "odoo-users"), "passwords need a schema"
+    assert wave("Job", "odoo-users") < wave("Deployment", "-web"), (
+        "web cannot be healthy before the schema exists"
+    )
 
 
 def test_users_job_runs_after_schema_initialisation(manifests):

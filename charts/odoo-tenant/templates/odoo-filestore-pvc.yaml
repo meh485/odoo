@@ -6,6 +6,12 @@ kind: PersistentVolumeClaim
 metadata:
   name: {{ $tenant }}-filestore
   namespace: {{ $tenant }}
+  annotations:
+    # Wave 3, in the same wave as its first consumer. The storage class binds on
+    # first consumer, so the claim is Pending -- and therefore not Healthy to
+    # ArgoCD -- until a pod mounts it. An earlier wave would gate the sync on a
+    # resource that cannot become ready yet.
+    argocd.argoproj.io/sync-wave: "3"
   labels:
     {{- include "odoo.labels" . | nindent 4 }}
 spec:

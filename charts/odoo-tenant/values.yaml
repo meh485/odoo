@@ -6,6 +6,17 @@ tenant:
   name: ""
   hostname: ""
 
+argocd:
+  # Set by the ApplicationSet, never by `helm install`.
+  #
+  # The one-time Jobs cannot be a Helm hook and an ordered ArgoCD resource at
+  # once. ArgoCD maps `post-install` to PostSync, which runs only after every
+  # other resource is healthy -- and the web Deployment cannot be healthy until
+  # the schema exists, so the sync waits on a resource that waits on the job.
+  # With this true the Jobs carry ArgoCD's own annotations instead, ordered by
+  # sync-wave so they still run after the database and before the workloads.
+  enabled: false
+
 odoo:
   image:
     # Custom image: upstream's entrypoint passes the database password as a
