@@ -1,0 +1,14 @@
+# Scoped, justified exceptions to the misconfiguration scan. Each entry names
+# one rule and one path, so a real finding of the same rule anywhere else still
+# fails the build.
+misconfigurations:
+  - id: KSV-0109
+    paths:
+      - charts/odoo-tenant/templates/odoo-users-job.yaml
+    statement: >-
+      This ConfigMap holds the users bootstrap script, not credentials. The
+      flagged strings — admin_password, canary_password, admin.password — are
+      Python variable names and Secret key names; the script reads the actual
+      values from files mounted by External Secrets. Trivy's key-name heuristic
+      cannot distinguish a script that mentions a credential from a store that
+      contains one.

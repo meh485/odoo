@@ -58,13 +58,22 @@ jobs:
             | tar -xz -C "$RUNNER_TEMP" gitleaks
           "$RUNNER_TEMP/gitleaks" git --redact --no-banner --exit-code 1 .
       - name: trivy
-        uses: aquasecurity/trivy-action@v0.36.0
-        with:
-          scan-type: fs
-          scan-ref: .
-          scanners: vuln,misconfig
-          severity: HIGH,CRITICAL
-          # Unfixed findings are not actionable here, and the scan only stays
-          # worth reading if it is quiet when there is nothing to fix.
-          ignore-unfixed: true
-          exit-code: "1"
+        run: |
+          # The action offers no input for Helm values, and without them trivy
+          # does not render the chart at all: it logs a render error and exits
+          # zero, so the chart's own misconfigurations were never scanned. The
+          # binary is fetched directly and pinned, like gitleaks above.
+          curl -sSfL https://github.com/aquasecurity/trivy/releases/download/v0.74.0/trivy_0.74.0_Linux-64bit.tar.gz \
+            | tar -xz -C "$RUNNER_TEMP" trivy
+          # --ignore-unfixed: unfixed findings are not actionable here, and the
+          # scan only stays worth reading if it is quiet when there is nothing
+          # to fix. --ignorefile: the scoped KSV-0109 exception, which trivy
+          # only reads from the default name in its plain-text form.
+          "$RUNNER_TEMP/trivy" fs \
+            --scanners vuln,misconfig \
+            --severity HIGH,CRITICAL \
+            --ignore-unfixed \
+            --ignorefile .trivyignore.yaml \
+            --helm-values tenants/acme.yaml \
+            --exit-code 1 \
+            .
