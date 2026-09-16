@@ -14,6 +14,11 @@ metadata:
   name: odoo-tenants
   namespace: argocd
 spec:
+  # Required for the {{.tenant.name}} placeholders below. Without it the
+  # controller uses fasttemplate syntax, does not substitute them, and tries to
+  # create an Application literally named "odoo-{{.tenant.name}}" -- which the
+  # API server rejects, so the generator produces nothing at all.
+  goTemplate: true
   generators:
     - git:
         repoURL: git@github.com:meh485/odoo.git

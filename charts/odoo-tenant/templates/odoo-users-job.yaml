@@ -80,6 +80,11 @@ metadata:
     # database with no res_users table fails.
     helm.sh/hook-weight: "1"
     helm.sh/hook-delete-policy: before-hook-creation
+    # ArgoCD's equivalents, including the same ordering: the sync-wave runs
+    # after the init job's. ArgoCD ignores helm.sh/hook entirely.
+    argocd.argoproj.io/hook: PostSync
+    argocd.argoproj.io/hook-delete-policy: BeforeHookCreation
+    argocd.argoproj.io/sync-wave: "2"
 spec:
   backoffLimit: 3
   ttlSecondsAfterFinished: 3600

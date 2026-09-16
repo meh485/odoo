@@ -1,3 +1,5 @@
+import pathlib
+
 import pytest
 from conftest import by_kind, one
 
@@ -5,6 +7,17 @@ from conftest import by_kind, one
 def test_a_users_job_exists(manifests):
     job = one(manifests, "Job", "odoo-users")
     assert job["spec"]["template"]["spec"]["restartPolicy"] == "Never"
+
+
+def test_the_one_time_jobs_also_run_under_argocd():
+    # ArgoCD ignores helm.sh/hook, so a tenant synced from git would never
+    # initialise its database. Both jobs carry ArgoCD's own hook annotations,
+    # and their sync-waves keep init ahead of the password update.
+    for path, wave in (("charts/odoo-tenant/templates/odoo-init-job.yaml", "1"),
+                       ("charts/odoo-tenant/templates/odoo-users-job.yaml", "2")):
+        text = (pathlib.Path(__file__).resolve().parents[1] / path).read_text()
+        assert "argocd.argoproj.io/hook: PostSync" in text, f"{path} would not run under ArgoCD"
+        assert f'argocd.argoproj.io/sync-wave: "{wave}"' in text
 
 
 def test_users_job_runs_after_schema_initialisation(manifests):

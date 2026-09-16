@@ -25,6 +25,13 @@ def _slug(url: str) -> str:
     return slug.removesuffix(".git")
 
 
+def test_the_generator_uses_go_templates() -> None:
+    # Without goTemplate, the controller does not substitute {{.tenant.name}}:
+    # it tries to create an Application whose name is the literal placeholder,
+    # and the API server rejects it.
+    assert appset()["spec"].get("goTemplate") is True
+
+
 def test_the_referenced_project_exists() -> None:
     # An Application pointing at a project that was never created fails to
     # sync, and nothing else in the repository would notice.

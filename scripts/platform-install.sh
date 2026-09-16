@@ -7,6 +7,7 @@ CNPG_VERSION="1.25.0"
 ENVOY_GATEWAY_VERSION="v1.9.1"
 ENVOY_GATEWAY_CHART="oci://docker.io/envoyproxy/gateway-helm"
 KUBE_PROMETHEUS_VERSION="91.4.0"
+ARGOCD_VERSION="v3.5.3"
 
 # CloudNativePG publishes an install manifest rather than a Helm chart. The
 # image tag it deploys is what the cluster runs today.
@@ -31,6 +32,15 @@ helm upgrade --install kube-prometheus-stack prometheus-community/kube-prometheu
   --version "${KUBE_PROMETHEUS_VERSION}" \
   --namespace monitoring \
   -f platform/monitoring/kube-prometheus-stack-values.yaml
+
+# ArgoCD, which provisions the tenants from git. It is installed here, before
+# the platform manifests are applied at the end of this script, because the
+# ApplicationSet and AppProject in platform/argocd are ArgoCD custom resources:
+# applying them without these CRDs fails, and under `set -e` that aborts the
+# whole install.
+kubectl create namespace argocd --dry-run=client -o yaml | kubectl apply -f - >/dev/null
+kubectl apply --server-side -n argocd \
+  -f "https://raw.githubusercontent.com/argoproj/argo-cd/${ARGOCD_VERSION}/manifests/install.yaml"
 
 # Platform manifests are applied, not templated: the gateway, the object store
 # and the metrics sink are platform-owned and shared by every tenant.

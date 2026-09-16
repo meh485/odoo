@@ -34,7 +34,10 @@ seed() {
 
   local value="$supplied"
   if [ -z "$value" ]; then
-    value="$(LC_ALL=C tr -dc 'A-Za-z0-9' </dev/urandom | head -c 40)"
+    # openssl, not `tr /dev/urandom | head`: under `set -o pipefail` the head
+    # exits first and kills tr with SIGPIPE, so the pipeline reports 141 and
+    # this script aborts without creating anything.
+    value="$(openssl rand -hex 24)"
   fi
 
   kubectl create secret generic "$secret" -n "$NAMESPACE" \
