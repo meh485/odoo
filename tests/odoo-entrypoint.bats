@@ -49,7 +49,7 @@ render() { "$REPO_ROOT/images/odoo/entrypoint.sh"; }
 
 @test "rendered config is not world readable" {
   render
-  perms="$(stat -f '%Lp' "$ODOO_CONF_OUT" 2>/dev/null || stat -c '%a' "$ODOO_CONF_OUT")"
+  perms="$(file_perms "$ODOO_CONF_OUT")"
   [ "$perms" = "600" ]
 }
 

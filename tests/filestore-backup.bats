@@ -73,7 +73,7 @@ backup() { "$REPO_ROOT/scripts/filestore-backup.sh"; }
   [ -f "$AWS_SHARED_CREDENTIALS_FILE" ]
   grep -q 'aws_access_key_id=AKIDEXAMPLE' "$AWS_SHARED_CREDENTIALS_FILE"
   grep -q 'aws_secret_access_key=secret-example' "$AWS_SHARED_CREDENTIALS_FILE"
-  perms="$(stat -f '%Lp' "$AWS_SHARED_CREDENTIALS_FILE" 2>/dev/null || stat -c '%a' "$AWS_SHARED_CREDENTIALS_FILE")"
+  perms="$(file_perms "$AWS_SHARED_CREDENTIALS_FILE")"
   [ "$perms" = "600" ]
 }
 
