@@ -72,7 +72,55 @@ alertmanager:
     storage: {}
 
 grafana:
-  enabled: false
+  # Grafana runs locally so the dashboards are clickable. It is exposed through
+  # the existing gateway rather than a NodePort, and its dashboards are
+  # provisioned from ConfigMaps rather than clicked into existence.
+  enabled: true
+  replicas: 1
+  securityContext:
+    runAsNonRoot: true
+    runAsUser: 472
+    runAsGroup: 472
+    fsGroup: 472
+    seccompProfile:
+      type: RuntimeDefault
+  containerSecurityContext:
+    allowPrivilegeEscalation: false
+    readOnlyRootFilesystem: true
+    capabilities:
+      drop: [ALL]
+  resources:
+    requests: { cpu: 50m, memory: 128Mi }
+    limits: { cpu: 200m, memory: 256Mi }
+  # Nothing to keep: dashboards come from ConfigMaps and the database is a
+  # demo.
+  persistence:
+    enabled: false
+  defaultDashboardsEnabled: false
+  env:
+    # The monitoring namespace has no route to grafana.com, so the preinstalled
+    # apps and phone-home calls must not block startup.
+    GF_PLUGINS_PREINSTALL_DISABLED: "true"
+    GF_ANALYTICS_REPORTING_ENABLED: "false"
+    GF_ANALYTICS_CHECK_FOR_UPDATES: "false"
+    GF_NEWS_NEWS_FEED_ENABLED: "false"
+  sidecar:
+    dashboards:
+      # Picks up any ConfigMap labelled grafana_dashboard in this namespace.
+      enabled: true
+      label: grafana_dashboard
+  datasources:
+    datasources.yaml:
+      apiVersion: 1
+      datasources:
+        - name: Prometheus
+          # A fixed uid so the provisioned dashboard can reference it without
+          # depending on an id Grafana assigns at runtime.
+          uid: prometheus
+          type: prometheus
+          url: http://kube-prometheus-stack-prometheus.monitoring.svc.cluster.local:9090
+          isDefault: true
+          editable: false
 
 prometheus-node-exporter:
   enabled: false

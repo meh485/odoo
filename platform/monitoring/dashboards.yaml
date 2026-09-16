@@ -1,0 +1,67 @@
+# A provisioned dashboard, loaded by the Grafana sidecar. Editing it in the UI
+# would be lost on the next sync, so it lives here instead.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: grafana-dashboard-odoo
+  namespace: monitoring
+  labels:
+    grafana_dashboard: "1"
+data:
+  odoo-overview.json: |
+    {
+      "title": "Odoo tenants",
+      "uid": "odoo-tenants",
+      "schemaVersion": 39,
+      "refresh": "30s",
+      "time": {"from": "now-6h", "to": "now"},
+      "panels": [
+        {
+          "id": 1,
+          "type": "stat",
+          "title": "Login canary",
+          "datasource": {"type": "prometheus", "uid": "prometheus"},
+          "gridPos": {"h": 6, "w": 6, "x": 0, "y": 0},
+          "targets": [
+            {"refId": "A", "expr": "odoo_canary_success", "legendFormat": "{{tenant}}"}
+          ],
+          "fieldConfig": {"defaults": {"mappings": [], "thresholds": {"mode": "absolute", "steps": [{"color": "red", "value": null}, {"color": "green", "value": 1}]}}, "overrides": []}
+        },
+        {
+          "id": 2,
+          "type": "stat",
+          "title": "Restore drill",
+          "datasource": {"type": "prometheus", "uid": "prometheus"},
+          "gridPos": {"h": 6, "w": 6, "x": 6, "y": 0},
+          "targets": [
+            {"refId": "A", "expr": "odoo_restore_drill_success", "legendFormat": "{{tenant}}"}
+          ],
+          "fieldConfig": {"defaults": {"mappings": [], "thresholds": {"mode": "absolute", "steps": [{"color": "red", "value": null}, {"color": "green", "value": 1}]}}, "overrides": []}
+        },
+        {
+          "id": 3,
+          "type": "stat",
+          "title": "Hours since last backup",
+          "datasource": {"type": "prometheus", "uid": "prometheus"},
+          "gridPos": {"h": 6, "w": 12, "x": 12, "y": 0},
+          "targets": [
+            {"refId": "A", "expr": "(time() - cnpg_collector_last_available_backup_timestamp) / 3600", "legendFormat": "{{namespace}}"}
+          ],
+          "fieldConfig": {"defaults": {"unit": "h", "mappings": [], "thresholds": {"mode": "absolute", "steps": [{"color": "green", "value": null}, {"color": "red", "value": 26}]}}, "overrides": []}
+        },
+        {
+          "id": 4,
+          "type": "timeseries",
+          "title": "Odoo-domain signals",
+          "datasource": {"type": "prometheus", "uid": "prometheus"},
+          "gridPos": {"h": 8, "w": 24, "x": 0, "y": 6},
+          "targets": [
+            {"refId": "A", "expr": "odoo_cron_overdue_seconds", "legendFormat": "cron overdue ({{namespace}})"},
+            {"refId": "B", "expr": "odoo_mail_queue_depth", "legendFormat": "mail queue ({{namespace}})"},
+            {"refId": "C", "expr": "odoo_mail_outgoing_age_seconds", "legendFormat": "oldest queued mail ({{namespace}})"},
+            {"refId": "D", "expr": "pg_blocked_query_age_seconds", "legendFormat": "blocked query ({{namespace}})"}
+          ],
+          "fieldConfig": {"defaults": {"unit": "s", "custom": {"drawStyle": "line", "fillOpacity": 10, "lineWidth": 1, "showPoints": "never"}}, "overrides": []}
+        }
+      ]
+    }
