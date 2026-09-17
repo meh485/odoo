@@ -121,7 +121,11 @@ grafana:
   # "prometheus"); adding another default here made Grafana refuse to start,
   # because only one datasource per organization may be the default.
 
-prometheus-node-exporter:
+# Node-exporter is off at its real gate. Chart 91.x gates the subchart on
+# `nodeExporter.enabled`; the older `prometheus-node-exporter.enabled` key is
+# inert, which left the DaemonSet deployed and silently stuck at 0 ready under
+# the restricted standard this namespace enforces.
+nodeExporter:
   enabled: false
 
 kubeEtcd:
