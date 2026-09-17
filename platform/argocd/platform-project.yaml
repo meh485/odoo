@@ -1,0 +1,48 @@
+# The platform tier's project: the cluster-scoped half of this repository, kept
+# as a named object so the two tiers cannot be confused for one another.
+#
+# It is admin-level by construction, and deliberately so: its destinations
+# include the argocd namespace, and ArgoCD documents that a project able to
+# deploy there grants admin-level access. That is exactly what the tenant
+# project beside it must never have. Nothing uses this project yet; the root
+# Application that adopts the platform tier will attach to it (see DESIGN, "The
+# platform tier and the tenant tier").
+apiVersion: argoproj.io/v1alpha1
+kind: AppProject
+metadata:
+  name: platform
+  namespace: argocd
+spec:
+  description: The cluster-scoped platform tier - gateway, monitoring, storage, ArgoCD itself
+  sourceRepos:
+    - git@github.com:meh485/odoo.git
+  # The namespaces platform/ actually writes today, read off the manifests
+  # rather than widened in advance: the gateway, the monitoring stack and its
+  # policies, the object store, and ArgoCD's own configuration.
+  destinations:
+    - server: https://kubernetes.default.svc
+      namespace: argocd
+    - server: https://kubernetes.default.svc
+      namespace: monitoring
+    - server: https://kubernetes.default.svc
+      namespace: storage
+    - server: https://kubernetes.default.svc
+      namespace: envoy-gateway-system
+  # Cluster-scoped grants are enumerated, because this is where the power is:
+  # creating namespaces, and the GatewayClass the gateway controller serves.
+  # Conspicuously absent is CustomResourceDefinition, which stays installed by
+  # the bootstrap and unmanaged forever -- pruning a CRD deletes every custom
+  # resource of its kind, so the tenant databases would go with it.
+  clusterResourceWhitelist:
+    - group: ""
+      kind: Namespace
+    - group: gateway.networking.k8s.io
+      kind: GatewayClass
+  # Namespaced grants are wildcarded on purpose, and it is a real trade-off: the
+  # tier spans add-on custom resources (Gateway, EnvoyProxy, ServiceMonitor,
+  # PrometheusRule, PodMonitor, HTTPRoute, ApplicationSet, AppProject), and
+  # enumerating them means every new add-on silently breaks the platform sync.
+  # The destinations above plus the enumerated cluster grants are what bound it.
+  namespaceResourceWhitelist:
+    - group: "*"
+      kind: "*"

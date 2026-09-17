@@ -77,3 +77,49 @@ jobs:
             --helm-values tenants/acme.yaml \
             --exit-code 1 \
             .
+
+  boundaries:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # The guard is a diff, so it needs the base ref and enough history to
+          # resolve it.
+          fetch-depth: 0
+      - name: the tenant tier and the platform tier do not move together
+        run: |
+          # They are different owners and different ArgoCD projects: the
+          # platform tier is admin-level, because it may write the argocd
+          # namespace and every namespace the platform occupies, while the
+          # tenant tier may not. A diff that spans both is a diff no single
+          # reviewer is placed to judge, and it is the shape a change takes when
+          # someone has quietly acquired rights over the other tier.
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            git fetch --no-tags origin "${{ github.base_ref }}"
+            base="origin/${{ github.base_ref }}"
+          else
+            base="${{ github.event.before }}"
+          fi
+          case "$base" in
+            ""|0000000000000000000000000000000000000000) base="" ;;
+          esac
+          if [ -z "$base" ] || ! git rev-parse --verify --quiet "$base^{commit}" >/dev/null; then
+            # First push to a branch, or a history that cannot supply the range.
+            if git rev-parse --verify --quiet "HEAD~1" >/dev/null; then
+              base="HEAD~1"
+            else
+              echo "single-commit history: nothing to compare against"
+              exit 0
+            fi
+          fi
+          changed="$(git diff --name-only "$base" HEAD)"
+          echo "comparing $base..HEAD"
+          echo "$changed"
+          tenants=""
+          platform=""
+          if echo "$changed" | grep -q '^tenants/'; then tenants=yes; fi
+          if echo "$changed" | grep -q '^platform/'; then platform=yes; fi
+          if [ -n "$tenants" ] && [ -n "$platform" ]; then
+            echo "::error::this diff changes both tenants/ and platform/. Split it: a platform change alters the cluster the tenants run on, and belongs to the platform tier and its ArgoCD project."
+            exit 1
+          fi

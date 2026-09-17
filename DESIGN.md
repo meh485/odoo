@@ -91,6 +91,59 @@ every tenant is managed here, including the one that predates it, which was
 adopted rather than rebuilt and whose Helm release records were then removed so
 that no object has two owners.
 
+### The platform tier and the tenant tier
+
+The repository holds two tiers that answer to different owners, and they are
+separate ArgoCD projects: `odoo` for tenants, `platform` for the cluster-scoped
+half. The distinction is not cosmetic. ArgoCD documents that a project able to
+deploy into the namespace ArgoCD itself runs in has admin-level access, so
+`platform` is admin-level by construction — it may write `argocd`, `monitoring`,
+`storage` and `envoy-gateway-system` — while the tenant project deliberately may
+not, and a tenant Application can never be attached to it.
+
+**That boundary has a leak, and it is worth naming.** The tenant project's
+destinations are `namespace: "*"`, which includes `argocd`, and its namespaced
+resource whitelist is group/kind `*`. A chart that rendered an `Application`
+into the `argocd` namespace would therefore be allowed to, and that Application
+could name any project — including `default`, which a stock ArgoCD install
+leaves unrestricted. Nothing exploits this today, because one actor writes both
+tiers and the chart renders no ArgoCD resources. It becomes real the moment
+tenants self-serve their own values files, which is precisely what a repository
+split is for.
+
+Which gives the non-obvious conclusion: **splitting the repository is necessary
+but not sufficient.** Two repositories with separate write access stop a tenant
+author from editing the platform tier, but if the Applications those tenants
+generate can still create Applications in the `argocd` namespace, the escalation
+survives the split. Closing it means the tenant project has to stop allowing
+that namespace — either by enumerating the kinds the chart actually renders, or
+by generating a project per tenant scoped to its own namespace.
+
+In production the shape is two repositories with separate owners and separate
+review, connected without shared state: the `ApplicationSet` lives in the
+platform repository and its git generator reads `tenants/*.yaml` from the tenant
+repository, and a tenant `Application` takes the chart from the platform
+repository while taking its values file from the tenant repository using
+multiple sources (`$ref` plus `$values`; a source used only for values must set
+no `path`). Terraform or a bootstrap script provisions the cluster and installs
+ArgoCD, and ArgoCD operates the add-ons from there.
+
+That last step is deliberately not taken here, and the reason is worth stating
+rather than hiding: the bootstrap still installs the operators and applies
+`platform/` with `kubectl`, so a platform change is a script run rather than a
+diff ArgoCD would revert — and when this tier did drift, it went unnoticed until
+an unrelated chart change collided with it. The target shape is a root
+`Application` as the only object applied by hand, sync waves for ordering, and
+**manual sync with pruning off and CRDs never managed**, because pruning a
+CustomResourceDefinition deletes every custom resource of its kind: deleting
+CloudNativePG's would take the tenant databases with it. Migrating would be an
+adoption of existing objects, the same procedure used for the tenant that
+predated ArgoCD.
+
+What is enforced today is the file boundary: a CI job fails a diff that changes
+both `tenants/` and `platform/`, because that is a diff no single reviewer is
+placed to judge.
+
 ### Bootstrapping a tenant in order
 
 A tenant cannot be applied all at once: the schema-init job needs the database,
@@ -391,6 +444,19 @@ rather than a bigger cluster.
 
 Everything below is a real gap, not a hypothetical:
 
+- **The tenant project can still reach the ArgoCD namespace.** Its destinations
+  are `namespace: "*"` and its namespaced whitelist is group/kind `*`, and ArgoCD
+  treats a project that can deploy into the namespace ArgoCD runs in as
+  admin-level. Nothing exploits it while one actor writes both tiers, but it has
+  to be closed before tenants can write their own values files — and closing it
+  is not the same job as splitting the repository, which is why it is called out
+  separately. See "The platform tier and the tenant tier".
+- **The platform tier is applied, not reconciled.** `make platform` installs the
+  operators and applies `platform/` with `kubectl`, so a platform change is a
+  script run rather than a diff ArgoCD would revert — and this tier already
+  drifted once without anything noticing until an unrelated chart change
+  collided with it. The target shape, and the reasoning for not doing it here,
+  are in the same section.
 - **Loki is specified but not deployed.** Log aggregation is the next
   component to add; the manifests are not committed because an unrun manifest
   is a claim rather than a capability.

@@ -97,3 +97,45 @@ def test_every_tenant_declares_a_hostname() -> None:
     assert files, "no tenant values files"
     for path in files:
         assert yaml.safe_load(path.read_text())["tenant"]["hostname"]
+
+
+def projects() -> dict:
+    return {
+        document["metadata"]["name"]: document
+        for path in ARGOCD.glob("*.yaml")
+        for document in yaml.safe_load_all(path.read_text())
+        if document and document.get("kind") == "AppProject"
+    }
+
+
+def test_the_two_tiers_are_separate_projects() -> None:
+    # One project for tenants and one for the cluster-scoped platform tier. The
+    # platform project may write the namespace ArgoCD itself runs in, which
+    # ArgoCD documents as admin-level access, so the tenant tier must never
+    # share it.
+    assert {"odoo", "platform"} <= set(projects())
+
+
+def test_the_tenant_project_cannot_create_cluster_scoped_objects() -> None:
+    # The tenant project's only cluster-scoped grant is the tenants' own
+    # Namespaces. Anything else would hand the tenant tier cluster-wide reach.
+    granted = {
+        (entry["group"], entry["kind"])
+        for entry in projects()["odoo"]["spec"]["clusterResourceWhitelist"]
+    }
+    assert granted == {("", "Namespace")}
+
+
+def test_the_platform_project_never_grants_custom_resource_definitions() -> None:
+    # Pruning a CRD deletes every custom resource of its kind, so the tenant
+    # databases would go with CloudNativePG's. CRDs are installed once by the
+    # bootstrap and stay unmanaged.
+    granted = {
+        (entry["group"], entry["kind"])
+        for entry in projects()["platform"]["spec"]["clusterResourceWhitelist"]
+    }
+    assert ("apiextensions.k8s.io", "CustomResourceDefinition") not in granted
+
+
+def test_tenant_applications_never_use_the_platform_project() -> None:
+    assert appset()["spec"]["template"]["spec"]["project"] == "odoo"
