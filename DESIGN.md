@@ -4,9 +4,10 @@ How this repository runs Odoo for many customers on one Kubernetes cluster,
 why each choice was made, and what has been proven to work on a running
 cluster rather than only argued for.
 
-The starting point is the brief: much. Consulting is moving roughly 50 Odoo
-customers off managed hosting onto self-operated infrastructure and expects to
-reach 500+. The deliverable is this repository plus the reasoning below.
+The starting point is the brief: much. Consulting is preparing to move Odoo
+customers off managed hosting onto self-operated infrastructure, with a stated
+scale target of roughly 50 to 500+ customers. The deliverable is this repository
+plus the reasoning below.
 
 ## Architecture at a glance
 
@@ -21,7 +22,7 @@ platform/
   monitoring/  kube-prometheus-stack values, ServiceMonitors, alerts,
                NetworkPolicies, Grafana dashboards, pushgateway
   storage/     MinIO, the S3 endpoint CloudNativePG and restic write to
-  argocd/      ApplicationSet: one Application per directory in tenants/
+  argocd/      ApplicationSet: one Application per file in tenants/*.yaml
 images/canary/ Synthetic Odoo probe, built locally and loaded into kind
 ```
 
@@ -41,9 +42,6 @@ tenant.
 **Kubernetes on kind for development.** One platform, so configuration
 transfers. kind runs vanilla upstream Kubernetes, starts in seconds, and is
 what CloudNativePG and Envoy Gateway document their own installation against.
-k3d was rejected: k3s substitutes the service load balancer, the default
-ingress, and the storage backend, which reintroduces exactly the
-development/production gap this decision closes.
 
 Two local-only accommodations live in `platform/` and never touch the chart:
 kind has no cloud load balancer, so the Gateway is a NodePort matching the
@@ -65,17 +63,11 @@ the container's process list.
 **CloudNativePG for PostgreSQL.** An operator rather than a StatefulSet:
 `kind: Cluster` declares instances, storage, and backup destination, and the
 operator runs replication, failover, continuous WAL archiving, point-in-time
-recovery, and rolling minor upgrades. `kind: ScheduledBackup` replaces the
-backup script and its cron entirely, and `kind: Pooler` runs PgBouncer. Pooling
+recovery, and rolling minor upgrades. `kind: ScheduledBackup` replaces
+backup scripts and its cron entirely, and `kind: Pooler` runs PgBouncer. Pooling
 is `session`, never `transaction`: Odoo relies on prepared statements and
 session state, and transaction pooling breaks them intermittently rather than
 cleanly.
-
-The cost is real and stated: an operator is another dependency to understand
-and upgrade, and when it misbehaves the debugging target is a controller rather
-than a script. It is still the right trade — it removes the largest block of
-bespoke code available — but it is why the restore drill exists, to verify what
-the operator produces rather than trusting it.
 
 **Envoy Gateway with Gateway API.** Gateway API is the Ingress successor and
 needs an implementation behind it. ingress-nginx entered retirement in March
@@ -100,49 +92,6 @@ deploy into the namespace ArgoCD itself runs in has admin-level access, so
 `platform` is admin-level by construction — it may write `argocd`, `monitoring`,
 `storage` and `envoy-gateway-system` — while the tenant project deliberately may
 not, and a tenant Application can never be attached to it.
-
-**That boundary has a leak, and it is worth naming.** The tenant project's
-destinations are `namespace: "*"`, which includes `argocd`, and its namespaced
-resource whitelist is group/kind `*`. A chart that rendered an `Application`
-into the `argocd` namespace would therefore be allowed to, and that Application
-could name any project — including `default`, which a stock ArgoCD install
-leaves unrestricted. Nothing exploits this today, because one actor writes both
-tiers and the chart renders no ArgoCD resources. It becomes real the moment
-tenants self-serve their own values files, which is precisely what a repository
-split is for.
-
-Which gives the non-obvious conclusion: **splitting the repository is necessary
-but not sufficient.** Two repositories with separate write access stop a tenant
-author from editing the platform tier, but if the Applications those tenants
-generate can still create Applications in the `argocd` namespace, the escalation
-survives the split. Closing it means the tenant project has to stop allowing
-that namespace — either by enumerating the kinds the chart actually renders, or
-by generating a project per tenant scoped to its own namespace.
-
-In production the shape is two repositories with separate owners and separate
-review, connected without shared state: the `ApplicationSet` lives in the
-platform repository and its git generator reads `tenants/*.yaml` from the tenant
-repository, and a tenant `Application` takes the chart from the platform
-repository while taking its values file from the tenant repository using
-multiple sources (`$ref` plus `$values`; a source used only for values must set
-no `path`). Terraform or a bootstrap script provisions the cluster and installs
-ArgoCD, and ArgoCD operates the add-ons from there.
-
-That last step is deliberately not taken here, and the reason is worth stating
-rather than hiding: the bootstrap still installs the operators and applies
-`platform/` with `kubectl`, so a platform change is a script run rather than a
-diff ArgoCD would revert — and when this tier did drift, it went unnoticed until
-an unrelated chart change collided with it. The target shape is a root
-`Application` as the only object applied by hand, sync waves for ordering, and
-**manual sync with pruning off and CRDs never managed**, because pruning a
-CustomResourceDefinition deletes every custom resource of its kind: deleting
-CloudNativePG's would take the tenant databases with it. Migrating would be an
-adoption of existing objects, the same procedure used for the tenant that
-predated ArgoCD.
-
-What is enforced today is the file boundary: a CI job fails a diff that changes
-both `tenants/` and `platform/`, because that is a diff no single reviewer is
-placed to judge.
 
 ### Bootstrapping a tenant in order
 
@@ -208,35 +157,40 @@ single-purpose credential, not the projected bundle the Odoo pods mount —
 a compromised probe should not hold the admin password.
 
 **Odoo's database manager is closed.** `list_db = False` and a tenant-pinned
-`dbfilter` (`^<tenant>$`). Verified rather than assumed: the manager page still
+dbfilter (`^<tenant>$`). Verified rather than assumed: the manager page still
 renders, because `list_db = False` does not remove the page, but the operation
-the page exists for is denied. `helm test` posts to `/web/database/list` on the
-web Service, bypassing the Gateway, and asserts the response contains
-`AccessDenied`. A database list that succeeded there would be unauthenticated
-enumeration of every database on the instance.
+the page exists for is denied. The chart's rendered Helm test hook posts to
+`/web/database/list` on the web Service, bypassing the Gateway, and asserts the
+response contains `AccessDenied`. `tests/test_helm_tests.py` verifies that this
+hook exists and is hardened; executing it requires an actual Helm release. The
+live tenants are ArgoCD-managed, so `make e2e` is the live-cluster validation
+path. A database list that succeeded there would be unauthenticated enumeration
+of every database on the instance.
 
 **No default credentials.** Initialising an Odoo database from the CLI creates
 an `admin` account whose password is literally `admin`, and a freshly
 provisioned tenant would be reachable through the Gateway with that guessable
 credential. A post-install hook Job therefore sets the admin password from a
-mounted secret and creates the canary user. A `helm test` asserts that
-authenticating as `admin` with the password `admin` fails, which turns the
-guarantee into something the pipeline checks rather than something a runbook
-claims.
+mounted secret and creates the canary user. The rendered Helm test hook asserts
+that authenticating as `admin` with the password `admin` fails; its presence and
+hardening run in `make test`, while live ArgoCD tenants are checked through the
+cluster-level e2e suite.
 
-**Almost nothing has an identity.** Only the restore drill has a
-ServiceAccount, because it is the only workload that calls the API server: it is
-the only pod with `automountServiceAccountToken: true`, and its Role is scoped
-to this namespace, to `clusters` in `postgresql.cnpg.io`, and to reading exactly
-one named Secret. Every other workload runs with
-`automountServiceAccountToken: false` and has no token to steal. No wildcard
-verbs and no cluster-scoped grants appear anywhere in the tenant.
+**Almost nothing has an identity.** The restore drill is the only workload that
+calls the API server, so it is the only workload pod with
+`automountServiceAccountToken: true`; its Role is scoped to this namespace, to
+`clusters` in `postgresql.cnpg.io`, and to reading exactly one named Secret. The
+per-tenant ESO reader ServiceAccounts are identities for the operator, not
+workload identities, and have `automountServiceAccountToken: false`. Every other
+workload has no token to steal. No wildcard verbs and no cluster-scoped grants
+appear anywhere in the tenant.
 
 **ResourceQuota and LimitRange per namespace**, so one tenant cannot starve a
 node, and every workload declares requests and limits.
 
-What is *not* hardened yet is listed under limits below — digest pinning,
-Trivy, and gitleaks are specified in the brief but not wired into CI here.
+What is *not* hardened yet is listed under limits below — image digest pinning
+is still outstanding. Trivy and gitleaks are additional supply-chain checks in CI;
+they are deliberate additions beyond the brief's named topics.
 
 ## Data persistence and backup
 
@@ -267,9 +221,9 @@ when somebody opens an old invoice.
   single reader in the credentials namespace would need `get` across every
   tenant's Secret: one mistake in one namespace, and every customer's credentials
   are exposed at once. The scoped Role reduces a tenant's reach to its own
-  credential, which its workloads already mount, and the reader's
-  ServiceAccount lives in the tenant's namespace so its token is never an
-  identity the credentials namespace itself trusts.
+  credential, which its workloads already mount. The reader's ServiceAccount
+  lives in the tenant's namespace, and the cross-namespace RoleBinding names it
+  explicitly; the Role still grants only `get` on that one Secret.
 
 Backup age is exported by the operator
 (`cnpg_collector_last_available_backup_timestamp`) and alerted on: a backup that
@@ -358,32 +312,27 @@ provisioned from ConfigMaps by the chart's sidecar. Targets are discovered from
 labels rather than a list, so a new tenant is monitored the moment its
 namespace exists — there is no target file to forget to update.
 
-Three dashboards ship: an overview, **backups and recovery** (backup age,
+Four dashboards ship: an overview, **backups and recovery** (backup age,
 WAL archive lag, restore-drill result and age, attachments split across the
-database and filestore), and **tenant health** (scrape targets up, canary
+database and filestore), **tenant health** (scrape targets up, canary
 result and durations, Postgres backends and replication lag, database size,
-cache hit ratio, restart rate, and the silent-failure signals). Every query in
-them was checked against live Prometheus before the panel was written, so no
-panel is decorative. The tenant-health dashboard takes its tenant from a
-template variable discovered from the canary targets rather than hardcoding a
-name, so the same dashboard serves one customer or all of them.
+cache hit ratio, restart rate, and the silent-failure signals), and
+**platform** (Envoy gateway traffic and cluster resource use — is the cluster
+itself healthy, separately from whether any single tenant is serving). Every
+query in them was checked against live Prometheus before the panel was
+written, so no panel is decorative. The tenant-health dashboard takes its
+tenant from a template variable discovered from the canary targets rather than
+hardcoding a name, so the same dashboard serves one customer or all of them.
 
 Alertmanager runs in-cluster. No external receiver is configured here; in
 production these routes to whatever pages the on-call engineer.
 
 The monitoring stack is trimmed for the demo: node-exporter is off because it
-needs host access that `restricted` forbids, Grafana's bundled dashboards are
-off in favour of the tenant-focused ones, and the etcd, scheduler,
+needs host access that `restricted` forbids, and the etcd, scheduler,
 controller-manager and kube-proxy monitors are off because kubeadm binds those
 endpoints to 127.0.0.1 and no policy or scrape config can reach them. Under a
 managed control plane they would be enabled. kube-state-metrics is kept,
 because the restart panel on the tenant-health dashboard reads it.
-
-Nothing this stack scrapes is permanently red: `make e2e` asserts that no `up`
-is zero anywhere, not merely that the tenants are up. That assertion earned its
-place by catching twelve cluster-component targets that the monitoring
-namespace's own network policies were silently blocking — which is precisely
-the sort of noise that teaches an operator to ignore alerts.
 
 ## Scaling to 500 tenants
 
@@ -425,8 +374,9 @@ rather than a bigger cluster.
 
 ## Trade-offs
 
-- **Two operators to run.** CloudNativePG and Envoy Gateway are dependencies
-  to understand and upgrade, and their failure modes are controller-shaped.
+- **Several operators and controllers to run.** CloudNativePG, Envoy Gateway,
+  the Prometheus Operator, External Secrets and ArgoCD are dependencies to
+  understand and upgrade, and their failure modes are controller-shaped.
   Accepted because they delete the most bespoke code and because the restore
   drill independently verifies what the database operator produces.
 - **The restore drill is custom code.** No operator provides "and prove the
@@ -444,13 +394,10 @@ rather than a bigger cluster.
 
 Everything below is a real gap, not a hypothetical:
 
-- **The tenant project can still reach the ArgoCD namespace.** Its destinations
-  are `namespace: "*"` and its namespaced whitelist is group/kind `*`, and ArgoCD
-  treats a project that can deploy into the namespace ArgoCD runs in as
-  admin-level. Nothing exploits it while one actor writes both tiers, but it has
-  to be closed before tenants can write their own values files — and closing it
-  is not the same job as splitting the repository, which is why it is called out
-  separately. See "The platform tier and the tenant tier".
+- **The tenant project's destinations are still broad** (`namespace: "*"`),
+  which includes the namespace ArgoCD runs in. Latent while one actor writes
+  both tiers; narrowed to an explicit list before tenants write their own
+  values files.
 - **The platform tier is applied, not reconciled.** `make platform` installs the
   operators and applies `platform/` with `kubectl`, so a platform change is a
   script run rather than a diff ArgoCD would revert — and this tier already
@@ -464,9 +411,9 @@ Everything below is a real gap, not a hypothetical:
   full history and Trivy across the filesystem (HIGH and CRITICAL, unfixed
   ignored); what remains is pinning every image by digest so a tag cannot be
   repointed upstream underneath a deployment.
-- **No predictive disk alert.** The brief asks for projected time-to-full
-  rather than a static threshold; today there is a volume-usage alert, not a
-  `predict_linear` one.
+- **No predictive disk alert.** A production design should project time-to-full
+  rather than rely only on a static threshold; today there is a volume-usage
+  alert, not a `predict_linear` one.
 - **Crash-loop detection is a dashboard, not an alert.**
   `kube_pod_container_status_restarts_total` is on the tenant-health dashboard
   but has no rule of its own yet.
@@ -487,8 +434,9 @@ Everything below is a real gap, not a hypothetical:
   the scratch cluster's name is generated per run. At 500 tenants the drill
   schedules would also need staggering so that every tenant does not restore in
   the same hour.
-- **No multi-region or active-active.** Single region with tested recovery, as
-  the brief allows.
+- **No multi-region or active-active.** The challenge leaves deployment topology
+  open; this design chooses one region with tested recovery for the scope of the
+  submission.
 - **Adopting a tenant into the operator breaks its WAL archiving until the
   database restarts.** The operator rewrites the credential Secret and
   CloudNativePG's instance manager has it cached, so archiving fails with a
@@ -529,6 +477,9 @@ What has been demonstrated on the running cluster, not just asserted:
   `acme-pooler:5432` succeeds (the control) while connections to Prometheus in
   `monitoring` and to a second tenant's pooler time out.
 - **The database manager is closed** and **the default admin credential does
-  not work**, both asserted by `helm test` rather than by argument.
+  not work** are encoded as Helm test hooks and verified by
+  `tests/test_helm_tests.py` in `make test`; executing those hooks requires an
+  actual Helm release. The current ArgoCD-managed tenants are validated live by
+  the e2e suite.
 - **Backups and the restore drill** produce metrics that the dashboards read
   back, and the drill has recorded a success.

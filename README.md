@@ -64,18 +64,20 @@ The Gateway is a NodePort mapped to the host by the kind config, so add both
 hosts to `/etc/hosts` first:
 
 ```
-127.0.0.1 acme.odoo.local grafana.odoo.local
+127.0.0.1 acme.odoo.local beta.odoo.local newco.odoo.local gamma.odoo.local
+grafana.odoo.local argocd.odoo.local
 ```
 
 | What | Where |
 |---|---|
-| Odoo | <https://acme.odoo.local:8443> |
+| Odoo | `https://<tenant>.odoo.local:8443` |
 | Grafana | <https://grafana.odoo.local:8443> |
+| ArgoCD | <https://argocd.odoo.local:8443> |
 | Prometheus, Alertmanager | In-cluster only; reached through the API-server proxy |
 
 TLS is self-signed here, so expect a certificate warning (or `curl -k`).
 
-Credentials are generated per install and never committed. To read one:
+Credentials are materialized by External Secrets and never committed. To read one:
 
 ```bash
 # Grafana
@@ -93,9 +95,13 @@ kubectl -n acme get secret acme-odoo-admin \
 make test    # chart unit tests and shell tests; no cluster needed
 make e2e     # asserts the live cluster: targets up, canary, backups, alerts,
              # Grafana's datasource, and tenant isolation
-helm test acme -n acme   # in-cluster: connectivity, database manager closed,
-                         # default admin credential rejected
 ```
+
+The chart also renders Helm test hooks for connectivity, database-manager denial,
+and rejection of the default `admin`/`admin` credential. `make test` verifies
+those hooks are present and hardened. The live tenants are ArgoCD-managed rather
+than Helm-installed, so `helm test` is only applicable when a tenant has an
+actual Helm release.
 
 `make test` is the fast loop and the one CI runs. `make e2e` is the honest
 one: it fails if a scrape target is down, if the login canary cannot
@@ -138,8 +144,9 @@ monitored the moment its namespace exists: stale backups, stalled WAL
 archiving, a failing or stale restore drill, a failing canary, a stalled
 `ir_cron`, mail queuing silently, filestore drift, and lock contention.
 
-**Dashboards.** Grafana provisions three from ConfigMaps: an overview, backups
-and recovery, and tenant health.
+**Dashboards.** Grafana provisions four from ConfigMaps: an overview, backups
+and recovery, tenant health, and a platform view (gateway traffic and cluster
+resources).
 
 ## Limitations
 
